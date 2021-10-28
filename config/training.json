@@ -1,0 +1,24 @@
+{
+  "model": {
+    "name": "mobilenet_v3_small",
+    "num_classes": 5
+  },
+  "optimization": {
+    "random_seed": 42,
+    "initial" : {
+      "max_epochs": 100,
+      "batch_size": 256,
+      "learning_rate": 0.001,
+      "patience": 10
+    },
+    "deep_clustering" : {
+      "clustering_algorithm": "Kmeans",
+      "max_epochs": 1,
+      "reassignment_frequency": 1.0,
+      "learning_rate": 0.05,
+      "weight_decay": -5,
+      "batch_size": 256,
+      "momentum": 0.9
+    }
+  }
+}
