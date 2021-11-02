@@ -14,6 +14,8 @@ from scipy.sparse import csr_matrix, find
 import torch
 import torch.utils.data as data
 import torchvision.transforms as transforms
+import logging
+
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -147,7 +149,7 @@ def cluster_assign(images_lists, dataset):
     return ReassignedDataset(image_indexes, pseudolabels, dataset, t)
 
 
-def run_kmeans(x, nmb_clusters, verbose=False):
+def run_kmeans(x, nmb_clusters):
     """Runs kmeans on 1 GPU.
     Args:
         x: data
@@ -176,9 +178,10 @@ def run_kmeans(x, nmb_clusters, verbose=False):
     # perform the training
     clus.train(x, index)
     _, I = index.search(x, 1)
-    losses = faiss.vector_to_array(clus.obj)
-    if verbose:
-        print('k-means loss evolution: {0}'.format(losses))
+    
+    stats = clus.iteration_stats
+    losses = np.array([stats.at(i).obj for i in range(stats.size())])
+    logging.info(f'k-means loss evolution: {losses}')
 
     return [int(n[0]) for n in I], losses[-1]
 
@@ -197,7 +200,7 @@ class Kmeans(object):
     def __init__(self, k):
         self.k = k
 
-    def cluster(self, data, verbose=False):
+    def cluster(self, data):
         """Performs k-means clustering.
             Args:
                 x_data (np.array N * dim): data to cluster
@@ -208,13 +211,12 @@ class Kmeans(object):
         xb = preprocess_features(data)
 
         # cluster the data
-        I, loss = run_kmeans(xb, self.k, verbose)
+        I, loss = run_kmeans(xb, self.k)
         self.images_lists = [[] for i in range(self.k)]
         for i in range(len(data)):
             self.images_lists[I[i]].append(i)
 
-        if verbose:
-            print('k-means time: {0:.0f} s'.format(time.time() - end))
+        logging.info(f'k-means time: {time.time() - end:.0f} s')
 
         return loss
 
@@ -332,7 +334,7 @@ class PIC(object):
         self.nnn = nnn
         self.distribute_singletons = distribute_singletons
 
-    def cluster(self, data, verbose=False):
+    def cluster(self, data):
         end = time.time()
 
         # preprocess the data
@@ -371,6 +373,5 @@ class PIC(object):
         for c in images_lists:
             self.images_lists.append(images_lists[c])
 
-        if verbose:
-            print('pic time: {0:.0f} s'.format(time.time() - end))
+        logging.info(f'pic time: {time.time() - end:.0f} s')
         return 0

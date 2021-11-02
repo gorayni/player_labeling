@@ -188,7 +188,7 @@ def compute_features(loader, model, N):
 def train_deep_clustering(loader, model, criterion, optimizer, optimizer_last_fc, epoch):
     batch_time, losses, data_time = AverageMeter(), AverageMeter(), AverageMeter()
 
-    description = 'Epoch: [{epoch}][{iter}/{num_iter}] ' \
+    description = 'Epoch: [{epoch}] ' \
                   'Time: {batch_time.val:.3f} ({batch_time.avg:.3f}) ' \
                   'Data: {data_time.val:.3f} ({data_time.avg:.3f}) ' \
                   'Loss: {loss.val:.4f} ({loss.avg:.4f})'
@@ -223,8 +223,6 @@ def train_deep_clustering(loader, model, criterion, optimizer, optimizer_last_fc
             end = time.time()
 
             t.set_description(description.format(epoch=epoch,
-                                                 iter=i,
-                                                 num_iter=len(loader),
                                                  batch_time=batch_time,
                                                  data_time=data_time,
                                                  loss=losses))
@@ -272,7 +270,7 @@ def deepcluster_training(model_args, opt_args, train_args, model):
         features = compute_features(dataloader, model, len(dataloader.dataset))
 
         logging.info('Clustering the features')
-        clustering_loss = deepcluster.cluster(features, verbose=args.verbose)
+        clustering_loss = deepcluster.cluster(features)
 
         logging.info('Assigning pseudo labels')
         train_dataset = cluster_assign(deepcluster.images_lists, dataloader.dataset.imgs)
@@ -334,7 +332,7 @@ def deepcluster_training(model_args, opt_args, train_args, model):
         cluster_log.log(deepcluster.images_lists)
 
 
-def main(model_args, opt_args, train_args):
+def main(model_args, opt_args, train_args, main_args):
     logging.info("Parameters:")
     logging.info(model_args)
     logging.info(opt_args)
@@ -360,8 +358,9 @@ def main(model_args, opt_args, train_args):
 
     if torch.cuda.is_available():
         model.cuda()
-
-    initial_training(model_args, opt_args.initial, train_args, model)
+    
+    if not main_args.only_clustering:
+        initial_training(model_args, opt_args.initial, train_args, model)
 
     # Loading best initial trained model
     checkpoint = torch.load(model_args.initial_weights_path)
@@ -396,6 +395,9 @@ def parse_args():
     parser.add_argument('--log_config', required=False,
                         help='Logging configuration file (default: config/log_config.yml)',
                         default="config/log_config.yml", type=lambda p: Path(p))
+    parser.add_argument('--only_clustering', required=False,
+                        help='Skip initial training (default: False)',
+                        action='store_true')
 
     args = parser.parse_args()
     with open(args.conf) as json_file:
@@ -417,6 +419,8 @@ def parse_args():
                      'cluster_log_dir': conf.model.weights_dir.joinpath('clusters', comment),
                      'comment': comment})
 
+    main_args = Dict({'only_clustering': args.only_clustering})
+
     log_fname = datetime.now().strftime('%Y-%m-%d_%H-%M-%S.log')
     log_fpath = conf.model.weights_dir.joinpath('logs', log_fname)
     with open(args.log_config, 'rt') as f:
@@ -429,7 +433,8 @@ def parse_args():
                  'optimization': conf.optimization,
                  'training': training,
                  'logs': logs,
-                 'GPU': args.GPU})
+                 'GPU': args.GPU,
+                 'main': main_args})
 
 
 if __name__ == '__main__':
@@ -444,5 +449,5 @@ if __name__ == '__main__':
 
     start = time.time()
     logging.info('Starting main function')
-    main(args.model, args.optimization, args.training)
+    main(args.model, args.optimization, args.training, args.main)
     logging.info(f'Total Execution Time is {time.time() - start} seconds')
