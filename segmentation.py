@@ -83,7 +83,7 @@ def segment_video(point_rend, frames_dir, num_frames, batch_size):
     height, width = images_size(frames_dir)
     results = []
     for i in tqdm(range(0, num_frames, batch_size)):
-        frames = [imread(frames_dir.joinpath(f'{j + 1:05}.jpg')) for j in range(i, i + batch_size)]
+        frames = [imread(frames_dir.joinpath(f'{j + 1:05}.jpg')) for j in range(i, min(i + batch_size, num_frames))]
         with torch.no_grad():
             inputs = preprocess_batch(point_rend, frames, height, width)
             predictions = segment(point_rend, inputs)
@@ -142,8 +142,8 @@ if __name__ == '__main__':
         if not frames_dir.exists():
             frames_dir.mkdir(parents=True, exist_ok=True)
 
-        logging.info(f'Extracting frames into {frames_dir}')
-        subprocess.check_call(f'./extract_frames.sh "{str(video).strip()}" "{frames_dir}"', shell=True)
+            logging.info(f'Extracting frames into {frames_dir}')
+            subprocess.check_call(f'./extract_frames.sh "{str(video).strip()}" "{frames_dir}"', shell=True)
 
         num_frames = len(list(frames_dir.glob('*.jpg')))
         logging.info(f'Number of frames to segment {num_frames}')

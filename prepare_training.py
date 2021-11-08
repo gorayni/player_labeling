@@ -1,3 +1,4 @@
+import argparse
 import pickle
 from itertools import product
 from pathlib import Path
@@ -5,8 +6,9 @@ from pathlib import Path
 import numpy as np
 from pixellib.torchbackend.instance import instanceSegmentation
 from skimage import io
+from skimage.draw import polygon
 from sklearn.cluster import KMeans
-import argparse
+
 from IO import Players
 from IO import load_bboxes
 from IO import load_calibration
@@ -22,11 +24,11 @@ from segmentation import segment_video
 
 
 def load_segmentation_results(match_path, half, num_frames, pointrend_weights):
-    segmentation_results_fpath = match_path.joinpath(f'segmentation_results_{half + 1}.npy')
+    segmentation_results_fpath = match_path.joinpath(f'segmentation_results_{half + 1}_HQ.npy')
     if not segmentation_results_fpath.exists():
         # Loading PointRend
         point_rend = instanceSegmentation()
-        point_rend.load_model(pointrend_weights)
+        point_rend.load_model(str(pointrend_weights))
         point_rend.predictor.model.cuda()
 
         frames_dir = match_path.joinpath(f'{half + 1}_HQ/frames')
@@ -57,6 +59,15 @@ def filter_small_players(match_path, min_calibration_confidence=0.85, max_area=4
     return small_players
 
 
+def to_mask(bb, contours):
+    width, height = bb[2:] - bb[:2]
+    mask = np.zeros((height, width), dtype=np.uint8)
+    for contour in contours:
+        rr, cc = polygon(contour[:, 1], contour[:, 0])
+        mask[rr, cc] = 255
+    return mask
+
+
 def extract_midfielders_blobs(match_path, player_bboxes, pointrend_weights, min_dist_to_goals=20, hist_type='rgb'):
     PERSON_ID = 0
     players_blobs = {0: {}, 1: {}}
@@ -75,9 +86,9 @@ def extract_midfielders_blobs(match_path, player_bboxes, pointrend_weights, min_
             if any(d < min_dist_to_goals for d in distances):
                 continue
 
-            ss_frame = [(bb, mask) for bb, mask, class_id in zip(semantic_seg[idx]['boxes'],
-                                                                 semantic_seg[idx]['masks'],
-                                                                 semantic_seg[idx]['class_ids']) if
+            ss_frame = [(bb, mask_cnts) for bb, mask_cnts, class_id in zip(semantic_seg[idx]['boxes'],
+                                                                           semantic_seg[idx]['masks'],
+                                                                           semantic_seg[idx]['class_ids']) if
                         class_id == PERSON_ID]
 
             num_bboxes, num_objects = len(bboxes), len(ss_frame)
@@ -94,9 +105,9 @@ def extract_midfielders_blobs(match_path, player_bboxes, pointrend_weights, min_
             players_blobs[half][idx] = list()
             frame_path = frames_dir.joinpath(f'{idx + 1:05}.jpg')
             f = io.imread(frame_path)
-            for bb, mask_bb, mask in bboxes_masks:
+            for bb, mask_bb, mask_cnts in bboxes_masks:
                 patch = get_patch(f, mask_bb, False)
-                mask = 255 * mask.astype(np.uint8)
+                mask = to_mask(mask_bb, mask_cnts)
                 hist = calculate_patch_hist(patch, mask, hist_type)
                 players_blobs[half][idx].append((bb, hist))
     return players_blobs
