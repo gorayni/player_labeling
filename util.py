@@ -38,7 +38,7 @@ def get_dir_loader(data_dir, batch_size, num_workers=4, train=True):
         ])
     else:
         data_transform = transforms.Compose([
-            transforms.Resize(224),
+            transforms.Resize((224, 224)),
             transforms.ToTensor()
         ])
 
@@ -103,7 +103,7 @@ class Logger(object):
 
     def __init__(self, dir_path: Path):
         dir_path.mkdir(parents=True, exist_ok=True)
-        log_fname = datetime.now().strftime('%Y-%m-%d_%H-%M-%S.log')
+        log_fname = datetime.now().strftime('%Y-%m-%d_%H-%M-%S.pkl')
         self.path = dir_path.joinpath(log_fname)
         self.data = []
 

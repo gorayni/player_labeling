@@ -1,6 +1,9 @@
+from functools import partial
+
 import cv2
 import numpy as np
-from functools import partial
+from addict import Dict
+from skimage.draw import polygon
 
 rgb2hsv = partial(cv2.cvtColor, code=cv2.COLOR_RGB2HSV)
 rgb2lab = partial(cv2.cvtColor, code=cv2.COLOR_RGB2LAB)
@@ -24,25 +27,48 @@ def iou(boxA, boxB):
     return interArea / float(boxAArea + boxBArea - interArea)
 
 
+def match_by_iou(bboxes):
+    num_left, num_right = map(len, bboxes)
+    iou_scores = np.asarray([[iou(bboxes[0][j], bboxes[1][i]) for j in range(num_left)] for i in range(num_right)])
+
+    if num_left <= num_right:
+        correspondence = np.argmax(iou_scores, axis=0).tolist()
+        left_indices, right_indices = [], []
+        for i, c in enumerate(correspondence):
+            left_indices.append(i)
+            right_indices.append(c)
+    else:
+        correspondence = np.argmax(iou_scores, axis=1).tolist()
+        left_indices, right_indices = [], []
+        for i, c in enumerate(correspondence):
+            left_indices.append(c)
+            right_indices.append(i)
+    return left_indices, right_indices
+
+
 def calculate_hist(img, mask=None, hist_type='rgb'):
-    if hist_type == 'rgb':
-        # The histogram consists of 512 bins (quantize the RGB space into cubes by grid 8*8*8)
-        hist = cv2.calcHist([img], [0, 1, 2], mask, [8, 8, 8], [0, 256, 0, 256, 0, 256])
-    if hist_type == 'hsv':
-        # The histogram consists of 512 bins (quantize the HSV space into cubes by grid 8*8*8)
-        hist = cv2.calcHist([img], [0, 1, 2], mask, [8, 8, 8], [0, 180, 0, 256, 0, 256])
-    if hist_type == 'hs':
-        # The histogram consists of 512 bins (quantize the HS space into cubes by grid 8*8)
-        hist = cv2.calcHist([img], [0, 1], mask, [8, 8], [0, 180, 0, 256])
-    if hist_type == 'lab':
-        # The histogram consists of 512 bins (quantize the LAB space into cubes by grid 8*8*8)
-        hist = cv2.calcHist([img], [0, 1, 2], mask, [8, 8, 8], [0, 256, 0, 256, 0, 256])
-    if hist_type == 'ab':
-        # The histogram consists of 512 bins (quantize the AB space into cubes by grid 8*8)
-        hist = cv2.calcHist([img], [0, 1], mask, [8, 8], [0, 256, 0, 256])
-    hist = np.expand_dims(hist.flatten(), axis=0)
-    hist /= hist.sum()
-    return hist.astype(np.float32)
+    hist_options = Dict({'rgb': {'channels': [0, 1, 2],
+                                 'grid': [8, 8, 8],
+                                 'values_ranges': [0, 256, 0, 256, 0, 256]},
+                         'hsv': {'channels': [0, 1, 2],
+                                 'grid': [8, 8, 8],
+                                 'values_ranges': [0, 180, 0, 256, 0, 256]},
+                         'hs': {'channels': [0, 1],
+                                'grid': [8, 8],
+                                'values_ranges': [0, 180, 0, 256]},
+                         'lab': {'channels': [0, 1, 2],
+                                 'grid': [8, 8, 8],
+                                 'values_ranges': [0, 256, 0, 256, 0, 256]},
+                         'ab': {'channels': [0, 1],
+                                'grid': [8, 8],
+                                'values_ranges': [0, 256, 0, 256]},
+                         })
+    if options := hist_options.get(hist_type, None):
+        hist = cv2.calcHist([img], options.channels, mask, options.grid, options.values_ranges)
+        hist = np.expand_dims(hist.flatten(), axis=0)
+        hist /= hist.sum()
+        return hist.astype(np.float32)
+    return None
 
 
 def get_patch(frame, bbox, copy=True):
@@ -51,6 +77,21 @@ def get_patch(frame, bbox, copy=True):
         return np.copy(frame[y1:y2, x1:x2, :])
     else:
         return frame[y1:y2, x1:x2, :]
+
+
+def to_mask(bb, contours):
+    width, height = bb[2:] - bb[:2]
+    mask = np.zeros((height, width), dtype=np.uint8)
+    for contour in contours:
+        rr, cc = polygon(contour[:, 1], contour[:, 0])
+        mask[rr, cc] = 255
+    return mask
+
+
+def get_masked_patch(frame, bbox, mask_contour):
+    patch = get_patch(frame, bbox, copy=False)
+    mask = to_mask(bbox, mask_contour)
+    return cv2.bitwise_and(patch, patch, mask=mask)
 
 
 def calculate_patch_hist(patch, mask=None, hist_type='rgb'):

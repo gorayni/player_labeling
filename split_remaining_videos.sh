@@ -22,7 +22,7 @@ find "$SOCCERNET_PATH" \
      -mindepth 4 \
      -maxdepth 4 \
      -type l \
-     -name '*_HQ.mkv' | was_not_segmented | sort | head -100 > "$videos_file"
+     -name '*_HQ.mkv' | was_not_segmented | sort > "$videos_file"
 
 find . -maxdepth 1 -type f -name 'tmp_video_file_*' | xargs -I{} rm "{}"
 split -n l/"$NUM_PROCESSES" -e "$videos_file" tmp_video_file_

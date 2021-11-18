@@ -101,6 +101,7 @@ def export_vott(match_path, half, player_bboxes, model, preprocess=None, dataset
                 "assets": {}
                 }
 
+    model.eval()
     annotations = []
     for idx in sorted(player_bboxes[half].keys()):
         bboxes = player_bboxes[half][idx]
@@ -163,8 +164,8 @@ def export_vott(match_path, half, player_bboxes, model, preprocess=None, dataset
 def _to_coords(bbox):
     x0 = bbox['left']
     y0 = bbox['top']
-    x1 = bbox['height'] + x0
-    y1 = bbox['width'] + y0
+    x1 = bbox['width'] + x0
+    y1 = bbox['height'] + y0
     return [x0, y0, x1, y1]
 
     

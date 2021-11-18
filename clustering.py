@@ -16,7 +16,6 @@ import torch.utils.data as data
 import torchvision.transforms as transforms
 import logging
 
-
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 __all__ = ['PIC', 'Kmeans', 'cluster_assign', 'arrange_clustering']
@@ -84,10 +83,10 @@ def preprocess_features(npdata, pca=256):
         np.array of dim N * pca: data PCA-reduced, whitened and L2-normalized
     """
     _, ndim = npdata.shape
-    npdata =  npdata.astype('float32')
+    npdata = npdata.astype('float32')
 
     # Apply PCA-whitening with Faiss
-    mat = faiss.PCAMatrix (ndim, pca, eigen_power=-0.5)
+    mat = faiss.PCAMatrix(ndim, pca, eigen_power=-0.5)
     mat.train(npdata)
     assert mat.is_trained
     npdata = mat.apply_py(npdata)
@@ -97,29 +96,6 @@ def preprocess_features(npdata, pca=256):
     npdata = npdata / row_sums[:, np.newaxis]
 
     return npdata
-
-
-def make_graph(xb, nnn):
-    """Builds a graph of nearest neighbors.
-    Args:
-        xb (np.array): data
-        nnn (int): number of nearest neighbors
-    Returns:
-        list: for each data the list of ids to its nnn nearest neighbors
-        list: for each data the list of distances to its nnn NN
-    """
-    N, dim = xb.shape
-
-    # we need only a StandardGpuResources per GPU
-    res = faiss.StandardGpuResources()
-
-    # L2
-    flat_config = faiss.GpuIndexFlatConfig()
-    flat_config.device = int(torch.cuda.device_count()) - 1
-    index = faiss.GpuIndexFlatL2(res, dim, flat_config)
-    index.add(xb)
-    D, I = index.search(xb, nnn + 1)
-    return I, D
 
 
 def cluster_assign(images_lists, dataset):
@@ -133,18 +109,13 @@ def cluster_assign(images_lists, dataset):
                                                      labels
     """
     assert images_lists is not None
-    pseudolabels = []
-    image_indexes = []
+    pseudolabels, image_indexes = [], []
     for cluster, images in enumerate(images_lists):
         image_indexes.extend(images)
         pseudolabels.extend([cluster] * len(images))
 
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-    t = transforms.Compose([transforms.RandomResizedCrop(224),
-                            transforms.RandomHorizontalFlip(),
-                            transforms.ToTensor(),
-                            normalize])
+    t = transforms.Compose([transforms.Resize((224, 224)),
+                            transforms.ToTensor()])
 
     return ReassignedDataset(image_indexes, pseudolabels, dataset, t)
 
@@ -178,7 +149,7 @@ def run_kmeans(x, nmb_clusters):
     # perform the training
     clus.train(x, index)
     _, I = index.search(x, 1)
-    
+
     stats = clus.iteration_stats
     losses = np.array([stats.at(i).obj for i in range(stats.size())])
     logging.info(f'k-means loss evolution: {losses}')
@@ -187,8 +158,7 @@ def run_kmeans(x, nmb_clusters):
 
 
 def arrange_clustering(images_lists):
-    pseudolabels = []
-    image_indexes = []
+    pseudolabels, image_indexes = [], []
     for cluster, images in enumerate(images_lists):
         image_indexes.extend(images)
         pseudolabels.extend([cluster] * len(images))
@@ -197,8 +167,10 @@ def arrange_clustering(images_lists):
 
 
 class Kmeans(object):
-    def __init__(self, k):
+    def __init__(self, k, pca_dimensions=256):
         self.k = k
+        self.pca_dimensions = pca_dimensions
+        self.images_lists = [[] for _ in range(self.k)]
 
     def cluster(self, data):
         """Performs k-means clustering.
@@ -208,17 +180,40 @@ class Kmeans(object):
         end = time.time()
 
         # PCA-reducing, whitening and L2-normalization
-        xb = preprocess_features(data)
+        xb = preprocess_features(data, pca=self.pca_dimensions)
 
         # cluster the data
         I, loss = run_kmeans(xb, self.k)
-        self.images_lists = [[] for i in range(self.k)]
+        self.images_lists = [[] for _ in range(self.k)]
         for i in range(len(data)):
             self.images_lists[I[i]].append(i)
 
         logging.info(f'k-means time: {time.time() - end:.0f} s')
 
         return loss
+
+
+def make_graph(xb, nnn):
+    """Builds a graph of nearest neighbors.
+    Args:
+        xb (np.array): data
+        nnn (int): number of nearest neighbors
+    Returns:
+        list: for each data the list of ids to its nnn nearest neighbors
+        list: for each data the list of distances to its nnn NN
+    """
+    N, dim = xb.shape
+
+    # we need only a StandardGpuResources per GPU
+    res = faiss.StandardGpuResources()
+
+    # L2
+    flat_config = faiss.GpuIndexFlatConfig()
+    flat_config.device = int(torch.cuda.device_count()) - 1
+    index = faiss.GpuIndexFlatL2(res, dim, flat_config)
+    index.add(xb)
+    D, I = index.search(xb, nnn + 1)
+    return I, D
 
 
 def make_adjacencyW(I, D, sigma):
@@ -239,7 +234,7 @@ def make_adjacencyW(I, D, sigma):
     indptr = np.multiply(k, np.arange(V + 1))
 
     def exp_ker(d):
-        return np.exp(-d / sigma**2)
+        return np.exp(-d / sigma ** 2)
 
     exp_ker = np.vectorize(exp_ker)
     res_D = exp_ker(D)
@@ -252,12 +247,9 @@ def run_pic(I, D, sigma, alpha):
     """Run PIC algorithm"""
     a = make_adjacencyW(I, D, sigma)
     graph = a + a.transpose()
-    cgraph = graph
     nim = graph.shape[0]
 
     W = graph
-    t0 = time.time()
-
     v0 = np.ones(nim) / nim
 
     # power iterations
