@@ -32,9 +32,11 @@ def get_dir_loader(data_dir, batch_size, num_workers=4, train=True):
     if train:
         data_transform = transforms.Compose([
             transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            transforms.RandomHorizontalFlip(p=0.5)
+            transforms.RandomCrop(224),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomAutocontrast(p=0.2),
+            transforms.RandomGrayscale(p=0.15),
+            transforms.ToTensor()
         ])
     else:
         data_transform = transforms.Compose([

@@ -135,3 +135,5 @@ data_*/
 tmp_video_file_*
 
 *.npz
+*.png
+*.svg

@@ -6,7 +6,7 @@
   "optimization": {
     "random_seed": 42,
     "initial" : {
-      "max_epochs": 60,
+      "max_epochs": 100,
       "batch_size": 256,
       "learning_rate": 0.001,
       "patience": 7
