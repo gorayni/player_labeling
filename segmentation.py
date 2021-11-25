@@ -97,12 +97,17 @@ def segment_video(point_rend, frames_dir, num_frames, batch_size):
 if __name__ == '__main__':
 
     parser = ArgumentParser(description='PointRend Segmentation for Players')
-    parser.add_argument('-v', '--videos', required=True,
+
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('-s', '--single_video',
+                        help='Filepath for the video to process',
+                        default=None, type=lambda p: Path(p))
+    group.add_argument('-v', '--videos',
                         help='Path for files containing a video list to process',
                         default=None, type=lambda p: Path(p))
     parser.add_argument('--batch_size', required=False,
-                        help='PointRend batch size (default: 7)',
-                        default=7, type=int)
+                        help='PointRend batch size (default: 8)',
+                        default=8, type=int)
     parser.add_argument('--weights', required=False,
                         help='Weights of PointRend to load (default: "weights/pointrend_resnet50.pkl")',
                         default='weights/pointrend_resnet50.pkl', type=lambda p: Path(p))
@@ -113,6 +118,7 @@ if __name__ == '__main__':
                         help='Logging configuration file (default: config/log_config.yml)',
                         default="config/log_config.yml", type=lambda p: Path(p))
     args = parser.parse_args()
+
 
     log_fname = datetime.now().strftime('%Y-%m-%d_%H-%M-%S.log')
     log_fpath = args.logs_dir.joinpath(log_fname)
@@ -127,8 +133,11 @@ if __name__ == '__main__':
     point_rend.load_model(str(args.weights))
     point_rend.predictor.model.cuda()
 
-    with args.videos.open() as f:
-        videos = [Path(line) for line in f.readlines()]
+    if args.videos:
+        with args.videos.open() as f:
+            videos = [Path(line) for line in f.readlines()]
+    else:
+        videos = [args.single_video]
 
     for video in tqdm(videos, desc='Overall Progress', leave=True, position=0):
         half = int(video.stem[0]) - 1
@@ -143,7 +152,7 @@ if __name__ == '__main__':
             frames_dir.mkdir(parents=True, exist_ok=True)
 
             logging.info(f'Extracting frames into {frames_dir}')
-            subprocess.check_call(f'./extract_frames.sh "{str(video).strip()}" "{frames_dir}"', shell=True)
+            subprocess.check_call(f'./scripts/extract_frames.sh "{str(video).strip()}" "{frames_dir}"', shell=True)
 
         num_frames = len(list(frames_dir.glob('*.jpg')))
         logging.info(f'Number of frames to segment {num_frames}')

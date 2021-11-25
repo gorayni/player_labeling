@@ -1,6 +1,8 @@
 #!/bin/bash
 
-source soccernet_conf.sh
+export SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
+
+source "$SCRIPTS_DIR"/soccernet_conf.sh
 
 function was_not_segmented {
    while read line ; do
@@ -21,11 +23,9 @@ videos_file=`mktemp -t videos_XXXXXXXXXX.txt`
 find "$SOCCERNET_PATH" \
      -mindepth 4 \
      -maxdepth 4 \
-     -type l \
+     -type f \
      -name '*_HQ.mkv' | was_not_segmented | sort > "$videos_file"
 
 find . -maxdepth 1 -type f -name 'tmp_video_file_*' | xargs -I{} rm "{}"
 split -n l/"$NUM_PROCESSES" -e "$videos_file" tmp_video_file_
 rm "$videos_file"
-
-chmod a+rw tmp_video_file_*

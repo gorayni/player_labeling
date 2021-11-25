@@ -133,7 +133,9 @@ weights/
 data/
 data_*/
 tmp_video_file_*
+segmentation_logs/
 
 *.npz
 *.png
 *.svg
+*.mp4

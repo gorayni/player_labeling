@@ -73,19 +73,28 @@ def calculate_hist(img, mask=None, hist_type='rgb'):
 
 def get_patch(frame, bbox, copy=True):
     x1, y1, x2, y2 = bbox
-    if copy:
-        return np.copy(frame[y1:y2, x1:x2, :])
+    if len(frame.shape) == 3:
+        patch = frame[y1:y2, x1:x2, :]
     else:
-        return frame[y1:y2, x1:x2, :]
+        patch = frame[y1:y2, x1:x2]
+    return np.copy(patch) if copy else patch
 
 
 def to_mask(bb, contours):
     width, height = bb[2:] - bb[:2]
     mask = np.zeros((height, width), dtype=np.uint8)
-    for contour in contours:
-        rr, cc = polygon(contour[:, 1], contour[:, 0])
+    for cnt in contours:
+        rr, cc = polygon(cnt[:, 1], cnt[:, 0])
         mask[rr, cc] = 255
     return mask
+
+
+def draw_mask(frame, bb, contours):
+    x1, y1, x2, y2 = bb
+    patch = frame[y1:y2, x1:x2]
+    for cnt in contours:
+        rr, cc = polygon(cnt[:, 1], cnt[:, 0])
+        patch[rr, cc] = 255
 
 
 def get_masked_patch(frame, bbox, mask_contour):
