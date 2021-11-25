@@ -55,28 +55,37 @@ conda activate player_labeling
 
 # Semantic Segmentation
 
-For the player labeling and vector direction it is necessary to semantically segment the people in each frame from the dataset. For batch processing first set the number of semantic segmentation processes running in parallel in `scripts/soccernet_conf.sh`, the default value is `NUM_PROCESSES=2`. 
+For the player labeling and vector direction it is necessary to semantically segment the people in each frame from the dataset. For batch processing first set the number of semantic segmentation processes running in parallel in `scripts/soccernet_conf.sh`, the default value is `NUM_SEGMENTATION_PROCESSES=2`. 
 
 The next step is to split a list videos to segment for each process:
 
 ```shell
-./scripts/split_remaining_videos.sh
+./scripts/split_remaining_videos_to_segment.sh
 ```
 
-This will create a number of `NUM_PROCESSES` files containing the videos to process with names starting with the prefix `tmp_video_file_`
+This will create a number of `NUM_SEGMENTATION_PROCESSES` files containing the videos to process with names starting with the prefix `tmp_video_file_`
 
 For each temporal file we extract the semantic segmentation by executing a command like this:
 
 ```shell
-python segmentation.py -v tmp_video_file_aa
+python segmentation.py -v tmp_videos_file_aa
 ```
 
 # Player Labeling
 
+```shell
+./scripts/split_remaining_matches_to_label.sh
+```
+
+```shell
+python prepare_training_subset.py -m tmp_matches_file_aa
+```
 
 # Optical Flow Vector
 
 
 # Single video
 
-
+```shell
+python segmentation.py -s '/datasets/soccernet/england_epl/2014-2015/2015-02-21 - 18-00 Chelsea 1 - 1 Burnley/1_HQ.mkv' 
+```

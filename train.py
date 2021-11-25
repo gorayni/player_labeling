@@ -14,17 +14,10 @@ import torch.nn as nn
 import torchvision.models as models
 import yaml
 from addict import Dict
-from sklearn.metrics.cluster import normalized_mutual_info_score
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from clustering import Kmeans
-from clustering import PIC
-from clustering import arrange_clustering
-from clustering import cluster_assign
 from util import AverageMeter
-from util import Logger
-from util import UnifLabelSampler
 from util import get_dir_loader
 
 
@@ -146,7 +139,7 @@ def initial_training(model_args, opt_args, train_args, model):
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', verbose=True,
                                                            patience=opt_args.patience)
-    writer = SummaryWriter(train_args.log_dir, train_args.comment)
+    writer = SummaryWriter(train_args.log_dir, train_args.initial_comment)
 
     Loaders = namedtuple('Loaders', 'train valid')
     train_loader = get_dir_loader('data/train', opt_args.batch_size, train_args.max_num_workers)
@@ -155,184 +148,7 @@ def initial_training(model_args, opt_args, train_args, model):
           model_args.initial_weights_path, opt_args.max_epochs, train_args.evaluation_frequency)
 
 
-def compute_features(loader, model, N):
-    logging.info('Computing features')
-    batch_time = AverageMeter()
-    end = time.time()
-    model.eval()
-
-    # discard the label information in the dataloader
-    with tqdm(enumerate(loader), total=len(loader)) as t:
-        for i, (input_tensor, _) in t:
-            input_var = torch.autograd.Variable(input_tensor.cuda(), volatile=True)
-            aux = model(input_var).data.cpu().numpy()
-
-            if i == 0:
-                features = np.zeros((N, aux.shape[1]), dtype='float32')
-
-            aux = aux.astype('float32')
-            if i < len(loader) - 1:
-                features[i * loader.batch_size: (i + 1) * loader.batch_size] = aux
-            else:
-                # special treatment for final batch
-                features[i * loader.batch_size:] = aux
-
-            # measure elapsed time
-            batch_time.update(time.time() - end)
-            end = time.time()
-
-            t.set_description(f'{i}/{len(loader)} Time: {batch_time.val:.3f} ({batch_time.avg:.3f})')
-    return features
-
-
-def train_deep_clustering(loader, model, criterion, optimizer, optimizer_last_fc, epoch):
-    batch_time, losses, data_time = AverageMeter(), AverageMeter(), AverageMeter()
-
-    description = 'Epoch: [{epoch}] ' \
-                  'Time: {batch_time.val:.3f} ({batch_time.avg:.3f}) ' \
-                  'Data: {data_time.val:.3f} ({data_time.avg:.3f}) ' \
-                  'Loss: {loss.val:.4f} ({loss.avg:.4f})'
-
-    model.train()
-
-    end = time.time()
-    with tqdm(enumerate(loader), total=len(loader)) as t:
-        for i, (input_tensor, target) in t:
-            data_time.update(time.time() - end)
-
-            target = target.cuda()
-            input_var = torch.autograd.Variable(input_tensor.cuda())
-            target_var = torch.autograd.Variable(target)
-
-            output = model(input_var)
-            loss = criterion(output, target_var)
-
-            # record loss
-            losses.update(loss.item(), loader.batch_size)
-
-            # compute gradient and do SGD step
-            optimizer.zero_grad()
-            optimizer_last_fc.zero_grad()
-            loss.backward()
-
-            optimizer.step()
-            optimizer_last_fc.step()
-
-            # measure elapsed time
-            batch_time.update(time.time() - end)
-            end = time.time()
-
-            t.set_description(description.format(epoch=epoch,
-                                                 batch_time=batch_time,
-                                                 data_time=data_time,
-                                                 loss=losses))
-
-    return losses.avg
-
-
-def deepcluster_training(model_args, opt_args, train_args, model):
-    criterion = nn.CrossEntropyLoss()
-
-    # remove head
-    if model_args.name == 'resnet18':
-        model.fc = None
-    elif 'mobilenet_v3' in model_args.name:
-        model.classifier._modules['3'] = None
-        model.classifier = nn.Sequential(*list(model.classifier.children())[:3])
-
-    optimizer = torch.optim.SGD(
-        filter(lambda x: x.requires_grad, model.parameters()),
-        lr=opt_args.learning_rate,
-        momentum=opt_args.momentum,
-        weight_decay=10 ** opt_args.weight_decay,
-    )
-    cluster_log = Logger(train_args.cluster_log_dir)
-
-    dataloader = get_dir_loader('data/unlabeled', opt_args.batch_size, train_args.max_num_workers)
-
-    deepcluster = Kmeans(5) if opt_args.clustering_algorithm == 'KMeans' else PIC(5)
-
-    description = 'Epoch [{epoch}] ' \
-                  'Time: {time:.3f}s ' \
-                  'Clustering loss: {clustering_loss:.3f} ' \
-                  'ConvNet loss: {loss:.3f}'
-
-    for epoch in range(opt_args.max_epochs):
-
-        # remove head
-        if model_args.name == 'resnet18':
-            model.fc = None
-        elif 'mobilenet_v3' in model_args.name:
-            model.classifier._modules['3'] = None
-            model.classifier = nn.Sequential(*list(model.classifier.children())[:3])
-
-        # get the features for the whole dataset
-        features = compute_features(dataloader, model, len(dataloader.dataset))
-
-        logging.info('Clustering the features')
-        clustering_loss = deepcluster.cluster(features)
-
-        logging.info('Assigning pseudo labels')
-        train_dataset = cluster_assign(deepcluster.images_lists, dataloader.dataset.imgs)
-
-        # uniformly sample per target
-        sampler = UnifLabelSampler(int(opt_args.reassignment_frequency * len(train_dataset)), deepcluster.images_lists)
-
-        train_dataloader = torch.utils.data.DataLoader(
-            train_dataset,
-            batch_size=opt_args.batch_size,
-            num_workers=train_args.max_num_workers,
-            sampler=sampler,
-            pin_memory=True,
-        )
-
-        # set last fully connected layer
-        if model_args.name == 'resnet18':
-            model.fc = None
-        elif 'mobilenet_v3' in model_args.name:
-            input_size = 1024 if model_args.name == 'mobilenet_v3_small' else 1280
-            last_fc = nn.Linear(input_size, len(deepcluster.images_lists))
-            last_fc.weight.data.normal_(0, 0.01)
-            last_fc.bias.data.zero_()
-            last_fc.cuda()
-            mlp = list(model.classifier.children())
-            mlp.append(last_fc)
-            model.classifier = nn.Sequential(*mlp)
-
-            optimizer_last_fc = torch.optim.SGD(
-                model.classifier._modules['3'].parameters(),
-                lr=opt_args.learning_rate,
-                weight_decay=10 ** opt_args.weight_decay,
-            )
-
-        # train network with clusters as pseudo-labels
-        end = time.time()
-        loss = train_deep_clustering(train_dataloader, model, criterion, optimizer, optimizer_last_fc, epoch)
-
-        logging.info(description.format(epoch=epoch,
-                                        time=time.time() - end,
-                                        clustering_loss=clustering_loss,
-                                        loss=loss))
-        try:
-            nmi = normalized_mutual_info_score(
-                arrange_clustering(deepcluster.images_lists),
-                arrange_clustering(cluster_log.data[-1])
-            )
-            logging.info(f'NMI against previous assignment: {nmi:.3f}')
-        except IndexError:
-            pass
-
-        state = {
-            'epoch': epoch + 1,
-            'arch': model_args.name,
-            'state_dict': model.state_dict(),
-            'optimizer': optimizer.state_dict(),
-        }
-        torch.save(state, model_args.deep_cluster_weights_path)
-        cluster_log.log(deepcluster.images_lists)
-
-
-def main(model_args, opt_args, train_args, main_args):
+def main(model_args, opt_args, train_args):
     logging.info("Parameters:")
     logging.info(model_args)
     logging.info(opt_args)
@@ -358,16 +174,8 @@ def main(model_args, opt_args, train_args, main_args):
 
     if torch.cuda.is_available():
         model.cuda()
-    
-    if not main_args.only_clustering:
-        initial_training(model_args, opt_args.initial, train_args, model)
 
-    # Loading best initial trained model
-    checkpoint = torch.load(model_args.initial_weights_path)
-    model.load_state_dict(checkpoint['state_dict'])
-    logging.info(f"=> loaded checkpoint '{model_args.initial_weights_path}' (epoch {checkpoint['epoch']})")
-
-    deepcluster_training(model_args, opt_args.deep_clustering, train_args, model)
+    initial_training(model_args, opt_args.initial, train_args, model)
 
 
 def parse_args():
@@ -395,9 +203,6 @@ def parse_args():
     parser.add_argument('--log_config', required=False,
                         help='Logging configuration file (default: config/log_config.yml)',
                         default="config/log_config.yml", type=lambda p: Path(p))
-    parser.add_argument('--only_clustering', required=False,
-                        help='Skip initial training (default: False)',
-                        action='store_true')
 
     args = parser.parse_args()
     with open(args.conf) as json_file:
@@ -405,21 +210,17 @@ def parse_args():
         conf = Dict(conf)
     conf.model.weights_dir = args.weights_dir.joinpath(conf.model.name)
     conf.model.initial_weights_path = conf.model.weights_dir.joinpath("initial_model.pth.tar")
-    conf.model.deep_cluster_weights_path = conf.model.weights_dir.joinpath("deep_cluster_model.pth.tar")
 
     comment_tmp = f'lr:{0} batch_size:{1}'
-    comment = comment_tmp.format(conf.opt.learning_rate,
-                                 conf.opt.batch_size)
+    initial_comment = comment_tmp.format(conf.opt.initial.learning_rate,
+                                 conf.opt.initial.batch_size)
 
     training = Dict({'data_path': args.data_path,
                      'max_num_workers': args.max_num_workers,
                      'evaluation_frequency': args.evaluation_frequency,
                      'weights': args.weights,
-                     'log_dir': conf.model.weights_dir.joinpath('runs', comment),
-                     'cluster_log_dir': conf.model.weights_dir.joinpath('clusters', comment),
-                     'comment': comment})
-
-    main_args = Dict({'only_clustering': args.only_clustering})
+                     'log_dir': conf.model.weights_dir.joinpath('runs', initial_comment),
+                     'initial_comment': initial_comment})
 
     log_fname = datetime.now().strftime('%Y-%m-%d_%H-%M-%S.log')
     log_fpath = conf.model.weights_dir.joinpath('logs', log_fname)
@@ -433,8 +234,7 @@ def parse_args():
                  'optimization': conf.optimization,
                  'training': training,
                  'logs': logs,
-                 'GPU': args.GPU,
-                 'main': main_args})
+                 'GPU': args.GPU})
 
 
 if __name__ == '__main__':

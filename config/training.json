@@ -10,16 +10,6 @@
       "batch_size": 256,
       "learning_rate": 0.001,
       "patience": 7
-    },
-    "deep_clustering" : {
-      "pca_dimensions": 512,
-      "clustering_algorithm": "KMeans",
-      "max_epochs": 10,
-      "reassignment_frequency": 1.0,
-      "learning_rate": 0.05,
-      "weight_decay": -5,
-      "batch_size": 256,
-      "momentum": 0.9
     }
   }
 }

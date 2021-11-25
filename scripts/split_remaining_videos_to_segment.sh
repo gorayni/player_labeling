@@ -17,7 +17,7 @@ function was_not_segmented {
 export -f was_not_segmented
 
 # Remove temporal files
-rm -f tmp_video_file_*
+rm -f tmp_videos_file_*
 
 videos_file=`mktemp -t videos_XXXXXXXXXX.txt`
 find "$SOCCERNET_PATH" \
@@ -26,6 +26,6 @@ find "$SOCCERNET_PATH" \
      -type f \
      -name '*_HQ.mkv' | was_not_segmented | sort > "$videos_file"
 
-find . -maxdepth 1 -type f -name 'tmp_video_file_*' | xargs -I{} rm "{}"
-split -n l/"$NUM_PROCESSES" -e "$videos_file" tmp_video_file_
+find . -maxdepth 1 -type f -name 'tmp_videos_file_*' | xargs -I{} rm "{}"
+split -n l/"$NUM_SEGMENTATION_PROCESSES" -e "$videos_file" tmp_videos_file_
 rm "$videos_file"

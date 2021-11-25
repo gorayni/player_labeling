@@ -1,14 +1,15 @@
 import argparse
 import pickle
+import shutil
 from itertools import product
 from pathlib import Path
 
+import cv2 as cv
 import numpy as np
 from skimage import io
 from skimage.morphology import binary_erosion
 from skimage.morphology import disk
 from sklearn.mixture import GaussianMixture
-import cv2 as cv
 
 from IO import Players
 from IO import load_bboxes
@@ -65,7 +66,7 @@ def match_semantic_segmentation_bboxes(bboxes, semantic_seg, idx, min_segmentati
         return [(bboxes[c], ss_frame[i][0], ss_frame[i][1]) for i, c in enumerate(correspondence)]
 
 
-def calculate_masked_patch_hist(frame, mask_bb, mask_cnt, erosion_disk_radius=1, hist_type='rgb'):
+def calculate_masked_patch_hist(frame, mask_bb, mask_cnt, erosion_disk_radius=2, hist_type='rgb'):
     patch = get_patch(frame, mask_bb, False)
     mask = to_mask(mask_bb, mask_cnt)
     if erosion_disk_radius > 0:
@@ -76,7 +77,7 @@ def calculate_masked_patch_hist(frame, mask_bb, mask_cnt, erosion_disk_radius=1,
 
 
 def extract_midfielders_blobs(match_path, player_bboxes, min_segmentation_score=0.65, min_dist_to_goals=20,
-                              erosion_disk_radius=1, hist_type='rgb'):
+                              min_player_bb_area=1000, erosion_disk_radius=2, hist_type='rgb'):
     players_blobs = {0: {}, 1: {}}
     for half in range(2):
         half_match_calibration = load_calibration(match_path, half)
@@ -98,6 +99,8 @@ def extract_midfielders_blobs(match_path, player_bboxes, min_segmentation_score=
             frame_path = frames_dir.joinpath(f'{idx + 1:05}.jpg')
             f = io.imread(frame_path)
             for bb, mask_bb, mask_cnt in bboxes_masks:
+                if area(mask_bb) < min_player_bb_area:
+                    continue
                 hist = calculate_masked_patch_hist(f, mask_bb, mask_cnt, erosion_disk_radius, hist_type)
                 players_blobs[half][idx].append((bb, mask_bb, mask_cnt, hist))
     return players_blobs
@@ -115,8 +118,8 @@ def reorder_labels(labels, labels_count):
     new_labels = {0: {}, 1: {}}
     for half, labels_by_frame in labels.items():
         for idx, labeled_bboxes in labels_by_frame.items():
-            new_labels[half][idx] = [(bb, mask_bb, mask_cnt, hist, correct_labels[l].value) for bb, mask_bb,
-                                                                                                mask_cnt, hist, l in
+            new_labels[half][idx] = [(bb, mask_bb, mask_cnts, hist, correct_labels[l].value) for bb, mask_bb,
+                                                                                                mask_cnts, hist, l in
                                      labeled_bboxes]
     return new_labels
 
@@ -144,7 +147,7 @@ def label_midfielders(players_blobs_by_half, min_prob_density=1.):
 
 def extract_goalkeeper(match_path, half, semantic_seg, goal_center, category, player_bboxes, labels,
                        min_segmentation_score=0.65, min_goalkeeper_and_goal_dist=5, min_dist_to_goalkeeper=2.5,
-                       erosion_disk_radius=1, hist_type='rgb'):
+                       min_player_bb_area=1000, erosion_disk_radius=2, hist_type='rgb'):
     half_match_calibration = load_calibration(match_path, half)
     frames_dir = match_path.joinpath(f'{half + 1}_HQ/frames')
 
@@ -171,6 +174,8 @@ def extract_goalkeeper(match_path, half, semantic_seg, goal_center, category, pl
                 continue
 
         bb, mask_bb, mask_cnt = bboxes_masks[gk_idx]
+        if area(mask_bb) < min_player_bb_area:
+            continue
         frame_path = frames_dir.joinpath(f'{idx + 1:05}.jpg')
         f = io.imread(frame_path)
         hist = calculate_masked_patch_hist(f, mask_bb, mask_cnt, erosion_disk_radius, hist_type)
@@ -178,7 +183,7 @@ def extract_goalkeeper(match_path, half, semantic_seg, goal_center, category, pl
 
 
 def extract_goalkeepers(match_path, player_bboxes, min_segmentation_score=0.65, min_goalkeeper_and_goal_dist=5,
-                        min_dist_to_goalkeeper=2.5, erosion_disk_radius=1, hist_type='rgb'):
+                        min_dist_to_goalkeeper=2.5, min_player_bb_area=1000, erosion_disk_radius=2, hist_type='rgb'):
     labels = {0: {}, 1: {}}
     for half in range(2):
         segmentation_results_fpath = match_path.joinpath(f'segmentation_results_{half + 1}_HQ.npy')
@@ -188,7 +193,7 @@ def extract_goalkeepers(match_path, player_bboxes, min_segmentation_score=0.65, 
             goal_center = GOAL_CENTERS[(half + i) % 2, :]
             extract_goalkeeper(match_path, half, semantic_seg, goal_center, goalkeeper.value, player_bboxes,
                                labels, min_segmentation_score, min_goalkeeper_and_goal_dist, min_dist_to_goalkeeper,
-                               erosion_disk_radius, hist_type)
+                               min_player_bb_area, erosion_disk_radius, hist_type)
     return labels
 
 
@@ -216,12 +221,13 @@ def filter_class_instances(labels, color_hist_threshold=0.4):
 
 
 def extract_preliminary_labels(match_path, player_bboxes, min_segmentation_score, min_gmm_prob_density,
-                               min_dist_to_goals, erosion_disk_radius, hist_type, min_goalkeeper_and_goal_dist,
-                               min_dist_to_goalkeeper, color_hist_threshold, save=True):
+                               min_dist_to_goals, min_player_bb_area, erosion_disk_radius, hist_type,
+                               min_goalkeeper_and_goal_dist, min_dist_to_goalkeeper, color_hist_threshold, save=True):
     midfielders_blobs = extract_midfielders_blobs(match_path,
                                                   player_bboxes,
                                                   min_segmentation_score,
                                                   min_dist_to_goals,
+                                                  min_player_bb_area,
                                                   erosion_disk_radius,
                                                   hist_type)
 
@@ -232,6 +238,7 @@ def extract_preliminary_labels(match_path, player_bboxes, min_segmentation_score
                                       min_segmentation_score,
                                       min_goalkeeper_and_goal_dist,
                                       min_dist_to_goalkeeper,
+                                      min_player_bb_area,
                                       erosion_disk_radius,
                                       hist_type)
 
@@ -253,12 +260,16 @@ def count_bboxes(labels: dict):
     return num_bboxes
 
 
-def create_init_training_splits(match_path, labels):
+def create_training_splits(match_path, labels, validation_proportion=0.1):
     num_bboxes = count_bboxes(labels)
-    is_train = np.random.binomial(1, 0.1, num_bboxes).astype(int)
+    is_train = np.random.binomial(1, validation_proportion, num_bboxes).astype(int)
 
-    train_dir = Path('data/train')
-    valid_dir = Path('data/valid')
+    splits_dir = match_path.joinpath('data')
+    train_dir = splits_dir.joinpath('train')
+    valid_dir = splits_dir.joinpath('valid')
+
+    if splits_dir.exists():
+        shutil.rmtree(splits_dir)
 
     split_dirs = [train_dir, valid_dir]
     category_dirs = {i: {} for i in range(2)}
@@ -285,58 +296,49 @@ def create_init_training_splits(match_path, labels):
                 i += 1
 
 
-def create_training_patches(match_path, players_bboxes):
-    data_dir, i = Path('data/unlabeled/0'), 0
-    data_dir.mkdir(parents=True, exist_ok=True)
-    for half in range(2):
-        segmentation_results_fpath = match_path.joinpath(f'segmentation_results_{half + 1}_HQ.npy')
-        semantic_seg = np.load(segmentation_results_fpath, allow_pickle=True)
-
-        frames_dir = match_path.joinpath(f'{half + 1}_HQ/frames')
-        for idx, bboxes in players_bboxes[half].items():
-            frame_path = frames_dir.joinpath(f'{idx + 1:05}.jpg')
-            f = io.imread(frame_path)
-
-            bboxes_masks = match_semantic_segmentation_bboxes(bboxes, semantic_seg, idx)
-            for bb, mask_bb, mask_cnt in bboxes_masks:
-                masked_patch = get_masked_patch(f, mask_bb, mask_cnt)
-                img_fpath = data_dir.joinpath(f'{i + 1:06}.jpg')
-                io.imsave(img_fpath, masked_patch)
-                i += 1
-
-
 def main(args):
-    labels_path = args.match_path.joinpath('labels.pkl')
     np.random.seed(args.seed)
 
-    players_bboxes = filter_small_players(args.match_path,
-                                          args.min_calibration_confidence,
-                                          args.max_player_area)
-    if not labels_path.exists():
-        labels = extract_preliminary_labels(args.match_path,
-                                            players_bboxes,
-                                            args.min_segmentation_score,
-                                            args.min_gmm_prob_density,
-                                            args.min_dist_to_goals,
-                                            args.erosion_disk_radius,
-                                            args.hist_type,
-                                            args.min_goalkeeper_and_goal_dist,
-                                            args.min_dist_to_goalkeeper,
-                                            args.color_hist_threshold)
+    if args.matches:
+        with args.matches.open() as f:
+            match_paths = [Path(line) for line in f.readlines()]
     else:
-        with labels_path.open(mode='rb') as fid:
-            labels = pickle.load(fid)
+        match_paths = [args.single_match]
 
-    create_init_training_splits(args.match_path, labels)
-    create_training_patches(args.match_path, players_bboxes)
+    for match_path in match_paths:
+        labels_path = match_path.joinpath('preliminary_player_labels.pkl')
+
+        players_bboxes = filter_small_players(match_path,
+                                              args.min_calibration_confidence,
+                                              args.max_player_area)
+        if not labels_path.exists():
+            labels = extract_preliminary_labels(match_path,
+                                                players_bboxes,
+                                                args.min_segmentation_score,
+                                                args.min_gmm_prob_density,
+                                                args.min_dist_to_goals,
+                                                args.min_player_bb_area,
+                                                args.erosion_disk_radius,
+                                                args.hist_type,
+                                                args.min_goalkeeper_and_goal_dist,
+                                                args.min_dist_to_goalkeeper,
+                                                args.color_hist_threshold)
+        else:
+            with labels_path.open(mode='rb') as fid:
+                labels = pickle.load(fid)
+
+        create_training_splits(match_path, labels, args.validation_proportion)
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Dataset Preprocessing for Deep Clustering')
-
-    parser.add_argument('-m', '--match_path', required=True,
-                        help='Path for SoccerNet dataset (default: None)',
-                        default=None, type=lambda p: Path(p))
+    parser = argparse.ArgumentParser(description='Dataset Preprocessing for Player Classification')
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('-s', '--single_match',
+                       help='Directory path for the match to process (default: None)',
+                       default=None, type=lambda p: Path(p))
+    group.add_argument('-m', '--matches',
+                       help='Path for a file containing a matches list to process',
+                       default=None, type=lambda p: Path(p))
     parser.add_argument('--min_calibration_confidence',
                         help='Minimum calibration confidence for filtering players (default: 0.85)',
                         default=0.85, type=float)
@@ -352,9 +354,12 @@ def parse_args():
     parser.add_argument('--min_dist_to_goals',
                         help='Minimum distance to goals for all midfielders [1-32] (default: 20)',
                         default=20., type=float)
+    parser.add_argument('--min_player_bb_area',
+                        help="Minimum bounding box area of detected player to consider (default: 1000)",
+                        default=1000, type=int)
     parser.add_argument('--erosion_disk_radius',
-                        help="Erosion disk radius for player's masks (default: 3)",
-                        default=3, type=int)
+                        help="Erosion disk radius for player's masks (default: 2)",
+                        default=2, type=int)
     parser.add_argument('--hist_type', choices=['rgb', 'hsv', 'hs', 'lab', 'ab'],
                         help='Histogram type for midfielders clustering  (default: rgb)',
                         default='rgb', type=str)
@@ -365,8 +370,12 @@ def parse_args():
                         help='Min distance between goalkeeper and other players [0-64] (default: 2.5)',
                         default=2.5, type=float)
     parser.add_argument('--color_hist_threshold',
-                        help='Color histogram threshold between an instance and the class median [0.0-1.0] (default: 0.4)',
+                        help='Color histogram threshold between an instance and the class median [0.0-1.0] (default: '
+                             '0.4)',
                         default=0.4, type=float)
+    parser.add_argument('--validation_proportion',
+                        help='Validation proportion for the training/validation splits [0.0-1.0] (default: 0.1)',
+                        default=0.1, type=float)
     parser.add_argument('--seed', help='random seed (default: 42)',
                         default=42, type=int)
     return parser.parse_args()
