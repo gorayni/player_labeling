@@ -10,6 +10,7 @@ from skimage import io
 from skimage.morphology import binary_erosion
 from skimage.morphology import disk
 from sklearn.mixture import GaussianMixture
+from tqdm import tqdm
 
 from IO import Players
 from IO import load_bboxes
@@ -119,7 +120,7 @@ def reorder_labels(labels, labels_count):
     for half, labels_by_frame in labels.items():
         for idx, labeled_bboxes in labels_by_frame.items():
             new_labels[half][idx] = [(bb, mask_bb, mask_cnts, hist, correct_labels[l].value) for bb, mask_bb,
-                                                                                                mask_cnts, hist, l in
+                                                                                                 mask_cnts, hist, l in
                                      labeled_bboxes]
     return new_labels
 
@@ -264,7 +265,7 @@ def create_training_splits(match_path, labels, validation_proportion=0.1):
     num_bboxes = count_bboxes(labels)
     is_train = np.random.binomial(1, validation_proportion, num_bboxes).astype(int)
 
-    splits_dir = match_path.joinpath('data')
+    splits_dir = match_path.joinpath('player_labeling', 'data')
     train_dir = splits_dir.joinpath('train')
     valid_dir = splits_dir.joinpath('valid')
 
@@ -301,12 +302,12 @@ def main(args):
 
     if args.matches:
         with args.matches.open() as f:
-            match_paths = [Path(line) for line in f.readlines()]
+            match_paths = [Path(line) for line in f.read().splitlines()]
     else:
         match_paths = [args.single_match]
 
-    for match_path in match_paths:
-        labels_path = match_path.joinpath('preliminary_player_labels.pkl')
+    for match_path in tqdm(match_paths, desc='Overall Progress', leave=True, position=0):
+        labels_path = match_path.joinpath('player_labeling', 'labels.pkl')
 
         players_bboxes = filter_small_players(match_path,
                                               args.min_calibration_confidence,

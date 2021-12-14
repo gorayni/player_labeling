@@ -89,12 +89,22 @@ def to_mask(bb, contours):
     return mask
 
 
-def draw_mask(frame, bb, contours):
+def draw_mask(frame, bb, contours, color=None):
     x1, y1, x2, y2 = bb
-    patch = frame[y1:y2, x1:x2]
-    for cnt in contours:
-        rr, cc = polygon(cnt[:, 1], cnt[:, 0])
-        patch[rr, cc] = 255
+    if len(frame.shape) == 3:
+        if color is None:
+            color = np.asarray([255, 255, 255])
+        patch = frame[y1:y2, x1:x2, :]
+        for cnt in contours:
+            rr, cc = polygon(cnt[:, 1], cnt[:, 0])
+            patch[rr, cc, :] = color
+    else:
+        if color is None:
+            color = 255
+        patch = frame[y1:y2, x1:x2]
+        for cnt in contours:
+            rr, cc = polygon(cnt[:, 1], cnt[:, 0])
+            patch[rr, cc] = color
 
 
 def get_masked_patch(frame, bbox, mask_contour):

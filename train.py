@@ -179,21 +179,22 @@ def main(model_args, opt_args, train_args):
 
 
 def parse_args():
-    parser = ArgumentParser(description='DeepClustering for players labeling training')
+    parser = ArgumentParser(description='Players labeling training')
     parser.add_argument('conf', help='JSON model configuration filepath',
                         type=lambda p: Path(p))
-    parser.add_argument('-d', '--data_path', required=True,
-                        help='Path for patches data (default: None)',
-                        default=None, type=lambda p: Path(p))
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('-s', '--single_match',
+                       help='Directory path for the match to process (default: None)',
+                       default=None, type=lambda p: Path(p))
+    group.add_argument('-m', '--matches',
+                       help='Path for a file containing a matches list to process',
+                       default=None, type=lambda p: Path(p))
     parser.add_argument('--max_num_workers', required=False,
                         help='number of worker to load data (default: 2)',
                         default=2, type=int)
     parser.add_argument('--evaluation_frequency', required=False,
                         help='Evaluation frequency in number of epochs (default: 10)',
                         default=10, type=int)
-    parser.add_argument('--weights_dir', required=False,
-                        help='Path for weights saving directory (default: weights)',
-                        default="weights", type=lambda p: Path(p))
     parser.add_argument('--weights', required=False,
                         help='Weights to load (default: None)',
                         default=None, type=str)
@@ -205,32 +206,32 @@ def parse_args():
                         default="config/log_config.yml", type=lambda p: Path(p))
 
     args = parser.parse_args()
+
+    if args.matches:
+        with args.matches.open() as f:
+            match_paths = [Path(m) for m in f.read().splitlines()]
+    else:
+        match_paths = [args.single_match]
+
     with open(args.conf) as json_file:
         conf = json.load(json_file)
         conf = Dict(conf)
-    conf.model.weights_dir = args.weights_dir.joinpath(conf.model.name)
-    conf.model.initial_weights_path = conf.model.weights_dir.joinpath("initial_model.pth.tar")
 
     comment_tmp = f'lr:{0} batch_size:{1}'
     initial_comment = comment_tmp.format(conf.opt.initial.learning_rate,
-                                 conf.opt.initial.batch_size)
+                                         conf.opt.initial.batch_size)
 
-    training = Dict({'data_path': args.data_path,
-                     'max_num_workers': args.max_num_workers,
+    training = Dict({'max_num_workers': args.max_num_workers,
                      'evaluation_frequency': args.evaluation_frequency,
                      'weights': args.weights,
-                     'log_dir': conf.model.weights_dir.joinpath('runs', initial_comment),
                      'initial_comment': initial_comment})
 
-    log_fname = datetime.now().strftime('%Y-%m-%d_%H-%M-%S.log')
-    log_fpath = conf.model.weights_dir.joinpath('logs', log_fname)
     with open(args.log_config, 'rt') as f:
         log_config = yaml.safe_load(f.read())
-        log_config['handlers']['file_handler']['filename'] = str(log_fpath)
-    logs = Dict({'log_config': log_config,
-                 'log_fpath': log_fpath})
+    logs = Dict({'log_config': log_config})
 
-    return Dict({'model': conf.model,
+    return Dict({'match_paths': match_paths,
+                 'model': conf.model,
                  'optimization': conf.optimization,
                  'training': training,
                  'logs': logs,
@@ -240,14 +241,26 @@ def parse_args():
 if __name__ == '__main__':
     args = parse_args()
 
-    args.logs.log_fpath.parent.mkdir(parents=True, exist_ok=True)
-    logging.config.dictConfig(args.logs.log_config)
-
     if args.GPU >= 0:
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         os.environ["CUDA_VISIBLE_DEVICES"] = str(args.GPU)
 
-    start = time.time()
-    logging.info('Starting main function')
-    main(args.model, args.optimization, args.training, args.main)
-    logging.info(f'Total Execution Time is {time.time() - start} seconds')
+    for match_path in tqdm(args.match_paths, desc='Overall Progress', leave=True, position=0):
+        weights_dir = match_path.joinpath('player_labeling', 'weights')
+        args.model.weights_dir = weights_dir.joinpath(args.model.name)
+        args.model.initial_weights_path = args.model.weights_dir.joinpath("initial_model.pth.tar")
+
+        args.training.data_path = match_path.joinpath('player_labeling', 'data')
+        args.training.log_dir = args.model.weights_dir.joinpath('runs', args.training.initial_comment),
+
+        log_fname = datetime.now().strftime('%Y-%m-%d_%H-%M-%S.log')
+        log_fpath = args.model.weights_dir.joinpath('logs', log_fname)
+        args.logs.log_config['handlers']['file_handler']['filename'] = str(log_fpath)
+
+        log_fpath.parent.mkdir(parents=True, exist_ok=True)
+        logging.config.dictConfig(args.logs.log_config)
+
+        start = time.time()
+        logging.info('Starting main function')
+        main(args.model, args.optimization, args.training)
+        logging.info(f'Total Execution Time is {time.time() - start} seconds')

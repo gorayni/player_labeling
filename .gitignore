@@ -132,8 +132,7 @@ dmypy.json
 weights/
 data/
 data_*/
-tmp_matches_file_*
-tmp_videos_file_*
+tmp_*
 segmentation_logs/
 
 *.npz
