@@ -49,7 +49,7 @@ def filter_small_players(match_path, min_calibration_confidence=0.85, max_area=4
 
 def match_semantic_segmentation_bboxes(bboxes, semantic_seg, idx, min_segmentation_score=0.65):
     PERSON_ID = 0
-    ss_frame = [(bb, mask_cnts) for bb, mask_cnts, class_id, score in zip(semantic_seg[idx]['boxes'],
+    ss_frame = [(bb, mask_cnts, score) for bb, mask_cnts, class_id, score in zip(semantic_seg[idx]['boxes'],
                                                                           semantic_seg[idx]['masks'],
                                                                           semantic_seg[idx]['class_ids'],
                                                                           semantic_seg[idx]['scores']) if
@@ -61,10 +61,10 @@ def match_semantic_segmentation_bboxes(bboxes, semantic_seg, idx, min_segmentati
 
     if num_bboxes <= num_objects:
         correspondence = np.argmax(iou_scores, axis=1).tolist()
-        return [(bboxes[i], ss_frame[c][0], ss_frame[c][1]) for i, c in enumerate(correspondence)]
+        return [(bboxes[i], ss_frame[c][0], ss_frame[c][1], ss_frame[c][2]) for i, c in enumerate(correspondence)]
     else:
         correspondence = np.argmax(iou_scores, axis=0).tolist()
-        return [(bboxes[c], ss_frame[i][0], ss_frame[i][1]) for i, c in enumerate(correspondence)]
+        return [(bboxes[c], ss_frame[i][0], ss_frame[i][1], ss_frame[i][2]) for i, c in enumerate(correspondence)]
 
 
 def calculate_masked_patch_hist(frame, mask_bb, mask_cnt, erosion_disk_radius=2, hist_type='rgb'):
@@ -99,7 +99,7 @@ def extract_midfielders_blobs(match_path, player_bboxes, min_segmentation_score=
             players_blobs[half][idx] = list()
             frame_path = frames_dir.joinpath(f'{idx + 1:05}.jpg')
             f = io.imread(frame_path)
-            for bb, mask_bb, mask_cnt in bboxes_masks:
+            for bb, mask_bb, mask_cnt, _ in bboxes_masks:
                 if area(mask_bb) < min_player_bb_area:
                     continue
                 hist = calculate_masked_patch_hist(f, mask_bb, mask_cnt, erosion_disk_radius, hist_type)
@@ -160,7 +160,7 @@ def extract_goalkeeper(match_path, half, semantic_seg, goal_center, category, pl
         if len(bboxes_masks) == 0:
             continue
 
-        positions = np.asarray([calculate_radar_position(bb, homography) for bb, _, _ in bboxes_masks])
+        positions = np.asarray([calculate_radar_position(bb, homography) for bb, _, _, _ in bboxes_masks])
         distances_to_goal = np.linalg.norm(positions - goal_center, axis=1)
         gk_idx = np.argmin(distances_to_goal)
         if distances_to_goal[gk_idx] > min_goalkeeper_and_goal_dist:
@@ -174,7 +174,7 @@ def extract_goalkeeper(match_path, half, semantic_seg, goal_center, category, pl
             if np.min(distances_to_goalkeeper) < min_dist_to_goalkeeper:
                 continue
 
-        bb, mask_bb, mask_cnt = bboxes_masks[gk_idx]
+        bb, mask_bb, mask_cnt, _ = bboxes_masks[gk_idx]
         if area(mask_bb) < min_player_bb_area:
             continue
         frame_path = frames_dir.joinpath(f'{idx + 1:05}.jpg')

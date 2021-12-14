@@ -1,18 +1,18 @@
-import logging.config
+import logging
 import subprocess
 import time
 from argparse import ArgumentParser
-from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import torch
-import yaml
 from PIL import Image
 from imantics import Polygons
 from pixellib.torchbackend.instance import instanceSegmentation
 from skimage.io import imread
 from tqdm import tqdm
+
+from util import load_log_configuration
 
 
 def images_size(frames_dir):
@@ -42,7 +42,9 @@ def cut_masks(bboxes, masks, copy=False):
 
 
 def to_polygons(masks):
-    return [Polygons.from_mask(m).points for m in masks]
+    if isinstance(masks, list):
+        return [Polygons.from_mask(m).points for m in masks]
+    return Polygons.from_mask(masks).points
 
 
 def segment(point_rend, inputs, polygonal_masks=True):
@@ -119,15 +121,7 @@ if __name__ == '__main__':
                         default="config/log_config.yml", type=lambda p: Path(p))
     args = parser.parse_args()
 
-
-    log_fname = datetime.now().strftime('%Y-%m-%d_%H-%M-%S.log')
-    log_fpath = args.logs_dir.joinpath(log_fname)
-    with args.log_config.open(mode='rt') as f:
-        log_config = yaml.safe_load(f.read())
-        log_config['handlers']['file_handler']['filename'] = str(log_fpath)
-
-    log_fpath.parent.mkdir(parents=True, exist_ok=True)
-    logging.config.dictConfig(log_config)
+    load_log_configuration(args.log_config, args.logs_dir)
 
     point_rend = instanceSegmentation()
     point_rend.load_model(str(args.weights))

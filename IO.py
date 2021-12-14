@@ -1,6 +1,8 @@
+import csv
 import json
 import uuid
 from enum import Enum, unique
+from pathlib import Path
 
 import numpy as np
 from skimage import io
@@ -32,6 +34,26 @@ def load_bboxes(full_match_path, half):
 
 def load_calibration(full_match_path, half):
     return load_jsons(full_match_path, half, '{}_field_calib_ccbv.json')
+
+
+def load_num_optical_flow_frames(dataset_path: Path):
+    num_optical_flow_frames_filepath = dataset_path.joinpath('num_optical_flow_frames.csv')
+    with num_optical_flow_frames_filepath.open(mode='r') as csv_file:
+        csv_reader = csv.DictReader(csv_file)
+        num_optical_flow_frames = {dataset_path.joinpath(r["match_path"]): [int(r["num_frames_first_half"]),
+                                                                            int(r["num_frames_second_half"])] for r
+                                   in csv_reader}
+    return num_optical_flow_frames
+
+
+def load_flow(half_match_path, idx):
+    u_frame_path = half_match_path.joinpath('u', f'{idx:06}.jpg')
+    u = io.imread(u_frame_path).astype(np.float32)
+
+    v_frame_path = half_match_path.joinpath('v', f'{idx:06}.jpg')
+    v = io.imread(v_frame_path).astype(np.float32)
+
+    return (np.stack((u, v), axis=2) - 128) / 127.999
 
 
 def export_vott(match_path, half, player_bboxes, model, preprocess=None, dataset_name='SoccerNet'):
@@ -168,7 +190,7 @@ def _to_coords(bbox):
     y1 = bbox['height'] + y0
     return [x0, y0, x1, y1]
 
-    
+
 def _to_label(region):
     categories = {'Referee': 0,
                   'Team A': 1,

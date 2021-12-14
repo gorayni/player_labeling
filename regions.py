@@ -119,3 +119,19 @@ def calculate_patch_hist(patch, mask=None, hist_type='rgb'):
     elif hist_type == 'lab' or hist_type == 'ab':
         patch = rgb2lab(patch)
     return calculate_hist(patch, mask, hist_type)
+
+
+def scale_mask(bb, cnts, scale):
+    scaled_mask_bb = (np.tile(scale, 2) * bb).astype(np.int32)
+    scaled_mask_shape = scaled_mask_bb[2:] - scaled_mask_bb[:2]
+
+    mask_shape = bb[2:] - bb[:2]
+    mask_scale = scaled_mask_shape / mask_shape
+
+    scaled_mask_cnts = [(mask_scale * cnt).astype(np.int32) for cnt in cnts]
+    return scaled_mask_bb, scaled_mask_cnts
+
+
+def cnts_to_indices(contours):
+    indices = np.concatenate([polygon(c[:, 1], c[:, 0]) for c in contours], axis=1).T
+    return indices[:, 0], indices[:, 1]
