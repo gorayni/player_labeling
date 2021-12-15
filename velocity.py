@@ -21,16 +21,18 @@ from tqdm import tqdm
 from IO import load_bboxes
 from IO import load_flow
 from IO import load_num_optical_flow_frames
-from optical_flow import caculate_dominant_orientation_vector
-from optical_flow import resize_to_flow_shape_and_remove_borders
 from optical_flow import add_missing_borders
+from optical_flow import build_second_moment_matrix
+from optical_flow import caculate_dominant_orientation_vector
+from optical_flow import caculate_inertia_matrix_components
+from optical_flow import resize_to_flow_shape_and_remove_borders
 from prepare_training_subset import match_semantic_segmentation_bboxes
+from regions import cnts_to_indices
 from regions import draw_mask
 from regions import get_patch
 from regions import scale_mask
-from regions import cnts_to_indices
-from util import load_log_configuration
 from segmentation import to_polygons
+from util import load_log_configuration
 
 
 def calculate_fixed_regions_mask(half_match_path, optical_flow_indices, num_rgb_frames, num_sampling_frames=540):
@@ -190,12 +192,20 @@ def calculate_velocity_vectors(match_path: Path, num_optical_flow_frames, num_sa
             flow = load_flow(half_match_path, optical_flow_indices[idx])
             flow = add_missing_borders(flow)
 
+            components = caculate_inertia_matrix_components(flow)
+
             field_mask = field_segmentation(rgb, semantic_seg, fixed_regions, idx, num_clusters, min_area_proportion,
                                             fixed_region_min_similarity, opening_disk_radius)
             field_cnt = to_polygons(field_mask)
 
             field_mask = img_as_bool(resize_to_flow_shape_and_remove_borders(field_mask))
-            field_vector = caculate_dominant_orientation_vector(flow[field_mask, :])
+            flow_vectors = flow[field_mask, :]
+            if len(flow_vectors) > 0:
+                # , components, mask=None, indices=None
+                M = build_second_moment_matrix(components, mask=field_mask)
+                field_vector = caculate_dominant_orientation_vector(M, flow_vectors)
+            else:
+                field_vector = np.zeros(2)
 
             scale = np.asarray([f / r for r, f in zip(rgb.shape[1::-1], flow.shape[1::-1])])
 
@@ -206,14 +216,19 @@ def calculate_velocity_vectors(match_path: Path, num_optical_flow_frames, num_sa
 
                 rr, cc = cnts_to_indices(scaled_mask_cnts)
                 flow_vectors = flow_patch[rr, cc, :]
-                dominant_vectors.append(caculate_dominant_orientation_vector(flow_vectors))# - field_vector)
+
+                components_patches = [get_patch(c, scaled_mask_bb, copy=False) for c in components]
+                M = build_second_moment_matrix(components_patches, indices=(rr, cc))
+
+                player_vector = caculate_dominant_orientation_vector(M, flow_vectors)
+                dominant_vectors.append(player_vector - field_vector)
 
                 gt_bboxes.append(bb)
                 mask_bbs.append(mask_bb)
                 mask_cnts_.append(mask_cnts)
                 scores.append(score)
             results[half][idx] = {'field_mask': field_cnt,
-                                  #'field_vector': field_vector,
+                                  'field_vector': field_vector,
                                   'gt_bboxes': gt_bboxes,
                                   'boxes': mask_bbs,
                                   'masks': mask_cnts_,

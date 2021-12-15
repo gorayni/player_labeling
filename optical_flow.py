@@ -43,13 +43,31 @@ def resize_to_flow_shape_and_remove_borders(img):
     return img
 
 
-# Second Moment Matrix Method
-def caculate_dominant_orientation_vector(gradient_vectors):
-    N = gradient_vectors.shape[0]
+def caculate_inertia_matrix_components(flow):
+    u = np.power(flow[:, :, 0], 2)
+    v = np.power(flow[:, :, 1], 2)
+    uv = flow[:, :, 0] * flow[:, :, 1]
+    return u, v, uv
 
-    # Building the second moment matrix
-    M = np.sum([np.tensordot(gradient_vectors[i], gradient_vectors[i].T, axes=0) for i in range(N)], axis=0)
-    magnitude = np.trace(M) / N
+
+def build_second_moment_matrix(components, mask=None, indices=None):
+    # M = np.sum([np.tensordot(gradient_vectors[i], gradient_vectors[i].T, axes=0) for i in range(N)], axis=0)
+    if mask is not None:
+        u, v, uv = [c[mask].sum(axis=0) for c in components]
+    else:
+        rr, cc = indices
+        u, v, uv = [c[rr, cc].sum(axis=0) for c in components]
+
+    M = uv * np.ones((2, 2))
+    M[0, 0] = u
+    M[1, 1] = u
+    return M
+
+
+# Second Moment Matrix Method
+def caculate_dominant_orientation_vector(M, gradient_vectors):
+
+    magnitude = np.trace(M) / gradient_vectors.shape[0]
 
     l, e = LA.eig(M)
     i = np.argsort(l)[1]
