@@ -166,8 +166,7 @@ def calculate_velocity_vectors(match_path: Path, num_optical_flow_frames, num_sa
     results = {0: {}, 1: {}}
 
     for half in range(2):
-        half_match_detections = load_bboxes(match_path, half)
-        num_rgb_frames = len(half_match_detections)
+        num_rgb_frames = len(load_bboxes(match_path, half))
 
         segmentation_results_fpath = match_path.joinpath(f'segmentation_results_{half + 1}_HQ.npy')
         semantic_seg = np.load(segmentation_results_fpath, allow_pickle=True)
@@ -183,7 +182,7 @@ def calculate_velocity_vectors(match_path: Path, num_optical_flow_frames, num_sa
         fixed_regions = segment_fixed_regions(half_match_path, optical_flow_indices, num_rgb_frames,
                                               num_sampling_frames_for_fixed_regions, gpu_devices)
 
-        for idx in tqdm(range(500), desc='Half-match progress', leave=True, position=0):
+        for idx in tqdm(range(num_rgb_frames), desc='Half-match progress', leave=True, position=0):
 
             # Removing all people from frame
             PERSON_ID = 0
