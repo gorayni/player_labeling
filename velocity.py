@@ -15,7 +15,6 @@ from skimage.morphology import disk
 from skimage.transform import resize
 from skimage.util import img_as_bool
 from skimage.util import img_as_ubyte
-from sklearn.cluster import KMeans
 from tqdm import tqdm
 
 from IO import load_bboxes
@@ -26,16 +25,17 @@ from optical_flow import build_second_moment_matrix
 from optical_flow import caculate_dominant_orientation_vector
 from optical_flow import caculate_inertia_matrix_components
 from optical_flow import resize_to_flow_shape_and_remove_borders
-from prepare_training_subset import match_semantic_segmentation_bboxes
 from regions import cnts_to_indices
 from regions import draw_mask
 from regions import get_patch
 from regions import scale_mask
 from segmentation import to_polygons
+from util import images_size, train_kmeans
 from util import load_log_configuration
 
 
-def calculate_fixed_regions_mask(half_match_path, optical_flow_indices, num_rgb_frames, num_sampling_frames=540):
+def calculate_fixed_regions_mask(half_match_path, optical_flow_indices, num_rgb_frames, num_sampling_frames=540,
+                                 gpu_devices=None):
     def load_abs_flow(idx):
         return np.abs(load_flow(half_match_path, optical_flow_indices[idx])) / num_sampling_frames
 
@@ -44,12 +44,12 @@ def calculate_fixed_regions_mask(half_match_path, optical_flow_indices, num_rgb_
     for idx in sampling_indices[1:]:
         mean_flow += load_abs_flow(idx)
 
-    kmeans = KMeans(n_clusters=2, random_state=0).fit(mean_flow.reshape((-1, 2)))
-    max_idx = np.argmax(np.histogram(kmeans.labels_, bins=[0, 1])[0])
+    labels = train_kmeans(mean_flow.reshape((-1, 2)), 2, 20, gpu_devices)[1]
+    max_idx = np.argmax(np.histogram(labels, bins=[0, 1])[0])
     centers = np.ones(2, dtype=np.uint8)
     centers[max_idx] = 0
 
-    mask = centers[kmeans.labels_.flatten()]
+    mask = centers[labels.flatten()]
     mask = mask.reshape(mean_flow.shape[:2])
 
     dilated_mask = np.zeros(mask.shape[:2], dtype=np.uint8)
@@ -57,8 +57,10 @@ def calculate_fixed_regions_mask(half_match_path, optical_flow_indices, num_rgb_
     return add_missing_borders(255 * dilated_mask)
 
 
-def segment_fixed_regions(half_match_path, optical_flow_indices, num_rgb_frames, num_sampling_frames=540):
-    mask = calculate_fixed_regions_mask(half_match_path, optical_flow_indices, num_rgb_frames, num_sampling_frames)
+def segment_fixed_regions(half_match_path, optical_flow_indices, num_rgb_frames, num_sampling_frames=540,
+                          gpu_devices=None):
+    mask = calculate_fixed_regions_mask(half_match_path, optical_flow_indices, num_rgb_frames, num_sampling_frames,
+                                        gpu_devices)
     sampling_indices = np.ceil(np.linspace(0, num_rgb_frames - 1, num=num_sampling_frames)).astype(int)
 
     idx = sampling_indices[0]
@@ -87,9 +89,11 @@ def segment_fixed_regions(half_match_path, optical_flow_indices, num_rgb_frames,
     return regions
 
 
-def field_segmentation(frame, semantic_seg, fixed_regions, idx, num_clusters=5, min_area_proportion=0.15,
-                       fixed_region_min_similarity=0.011, opening_disk_radius=8):
-    frame = frame.copy()
+def field_segmentation(frames_path, semantic_seg, fixed_regions, idx, num_clusters=5, max_iter=30,
+                       min_area_proportion=0.15, fixed_region_min_similarity=0.011, opening_disk_radius=8,
+                       gpu_devices=None):
+    frame_path = frames_path.joinpath(f'{idx + 1:05}.jpg')
+    frame = io.imread(frame_path)
 
     # Removing fixed regions from frame if found
     for r in fixed_regions:
@@ -116,9 +120,7 @@ def field_segmentation(frame, semantic_seg, fixed_regions, idx, num_clusters=5, 
     # Color quantization using K-means
     pixels = np.float32(frame.reshape((-1, 3)))
 
-    # TODO: Translate OpenCV algorithm to Scikit Learning
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
-    labels, centers = cv2.kmeans(pixels, num_clusters, None, criteria, 10, cv2.KMEANS_PP_CENTERS)[1:]
+    centers, labels = train_kmeans(pixels, num_clusters, max_iter, gpu_devices)
 
     # Sorting clusters by number of pixels
     sorted_indices = np.argsort(np.histogram(labels, bins=np.arange(num_clusters + 1))[0])[::-1]
@@ -159,9 +161,10 @@ def field_segmentation(frame, semantic_seg, fixed_regions, idx, num_clusters=5, 
 
 
 def calculate_velocity_vectors(match_path: Path, num_optical_flow_frames, num_sampling_frames_for_fixed_regions=540,
-                               num_clusters=5, min_area_proportion=0.15, fixed_region_min_similarity=0.011,
-                               opening_disk_radius=8):
+                               num_clusters=5, max_num_iters=30, min_area_proportion=0.15,
+                               fixed_region_min_similarity=0.011, opening_disk_radius=8, gpu_devices=None):
     results = {0: {}, 1: {}}
+
     for half in range(2):
         half_match_detections = load_bboxes(match_path, half)
         num_rgb_frames = len(half_match_detections)
@@ -176,63 +179,56 @@ def calculate_velocity_vectors(match_path: Path, num_optical_flow_frames, num_sa
         half_match_path = match_path.joinpath(f'{half + 1}_HQ')
         frames_path = half_match_path.joinpath('frames')
 
+        rgb_shape = images_size(frames_path)[::-1]
         fixed_regions = segment_fixed_regions(half_match_path, optical_flow_indices, num_rgb_frames,
-                                              num_sampling_frames_for_fixed_regions)
+                                              num_sampling_frames_for_fixed_regions, gpu_devices)
 
-        for idx in tqdm(range(num_rgb_frames), desc='Half-match progress', leave=True, position=0):
-            bboxes, onfield = map(half_match_detections[idx].get, ['bboxes', 'onfield'])
-            bboxes = [bb for bb, on in zip(bboxes, onfield) if on]
-            if len(bboxes) == 0:
+        for idx in tqdm(range(500), desc='Half-match progress', leave=True, position=0):
+
+            # Removing all people from frame
+            PERSON_ID = 0
+            people_bboxes = [(bb, mask_cnts) for bb, mask_cnts, class_id in zip(semantic_seg[idx]['boxes'],
+                                                                                semantic_seg[idx]['masks'],
+                                                                                semantic_seg[idx]['class_ids'])
+                             if class_id == PERSON_ID]
+
+            if len(people_bboxes) == 0:
                 continue
-            bboxes_masks = match_semantic_segmentation_bboxes(bboxes, semantic_seg, idx, 0.0)
-
-            rgb_frame_path = frames_path.joinpath(f'{idx + 1:05}.jpg')
-            rgb = io.imread(rgb_frame_path)
 
             flow = load_flow(half_match_path, optical_flow_indices[idx])
             flow = add_missing_borders(flow)
 
             components = caculate_inertia_matrix_components(flow)
-
-            field_mask = field_segmentation(rgb, semantic_seg, fixed_regions, idx, num_clusters, min_area_proportion,
-                                            fixed_region_min_similarity, opening_disk_radius)
+            field_mask = field_segmentation(frames_path, semantic_seg, fixed_regions, idx, num_clusters, max_num_iters,
+                                            min_area_proportion, fixed_region_min_similarity, opening_disk_radius,
+                                            gpu_devices)
             field_cnt = to_polygons(field_mask)
-
             field_mask = img_as_bool(resize_to_flow_shape_and_remove_borders(field_mask))
             flow_vectors = flow[field_mask, :]
+
             if len(flow_vectors) > 0:
-                # , components, mask=None, indices=None
                 M = build_second_moment_matrix(components, mask=field_mask)
                 field_vector = caculate_dominant_orientation_vector(M, flow_vectors)
             else:
                 field_vector = np.zeros(2)
 
-            scale = np.asarray([f / r for r, f in zip(rgb.shape[1::-1], flow.shape[1::-1])])
-
-            gt_bboxes, mask_bbs, mask_cnts_, scores, dominant_vectors = [], [], [], [], []
-            for bb, mask_bb, mask_cnts, score in bboxes_masks:
-                scaled_mask_bb, scaled_mask_cnts = scale_mask(mask_bb, mask_cnts, scale)
-                flow_patch = get_patch(flow, scaled_mask_bb, copy=False)
+            scale = np.asarray([f / r for r, f in zip(rgb_shape, flow.shape[1::-1])])
+            dominant_vectors = []
+            for bb, mask_cnts in people_bboxes:
+                scaled_bb, scaled_mask_cnts = scale_mask(bb, mask_cnts, scale)
+                flow_patch = get_patch(flow, scaled_bb, copy=False)
 
                 rr, cc = cnts_to_indices(scaled_mask_cnts)
                 flow_vectors = flow_patch[rr, cc, :]
 
-                components_patches = [get_patch(c, scaled_mask_bb, copy=False) for c in components]
+                components_patches = [get_patch(c, scaled_bb, copy=False) for c in components]
                 M = build_second_moment_matrix(components_patches, indices=(rr, cc))
 
                 player_vector = caculate_dominant_orientation_vector(M, flow_vectors)
                 dominant_vectors.append(player_vector - field_vector)
 
-                gt_bboxes.append(bb)
-                mask_bbs.append(mask_bb)
-                mask_cnts_.append(mask_cnts)
-                scores.append(score)
             results[half][idx] = {'field_mask': field_cnt,
                                   'field_vector': field_vector,
-                                  'gt_bboxes': gt_bboxes,
-                                  'boxes': mask_bbs,
-                                  'masks': mask_cnts_,
-                                  'scores': np.asarray(scores),
                                   'velocity': np.asarray(dominant_vectors)}
     return results
 
@@ -262,6 +258,12 @@ if __name__ == '__main__':
     parser.add_argument('--num_clusters',
                         help='Number of clusters for field segmentation (default: 5)',
                         default=5, type=int)
+    parser.add_argument('--max_num_iters',
+                        help='Max number of K-means iterations (default: 30)',
+                        default=30, type=int)
+    parser.add_argument('-g', '--gpu_devices', nargs='+',
+                        help='List of GPU devices to use for clustering (default: [])',
+                        default=[], required=False, type=int)
     parser.add_argument('--min_area_proportion',
                         help='Minimum area proportion w.r.t. the frame for a region to be '
                              'considered field (default: 0.15)',
@@ -297,9 +299,11 @@ if __name__ == '__main__':
         velocity = calculate_velocity_vectors(match_path, num_optical_flow_frames[match_path],
                                               args.num_sampling_frames_for_fixed_regions,
                                               args.num_clusters,
+                                              args.max_num_iters,
                                               args.min_area_proportion,
                                               args.fixed_region_min_similarity,
-                                              args.opening_disk_radius)
+                                              args.opening_disk_radius,
+                                              args.gpu_devices)
 
         np.save(velocity_results_fpath, velocity)
         logging.info(f'Match processing time is {time.time() - start} seconds')

@@ -2,7 +2,9 @@ import logging.config
 from datetime import datetime
 from pathlib import Path
 
+import faiss
 import yaml
+from PIL import Image
 from torch.utils.data import DataLoader
 from torchvision import datasets
 from torchvision import transforms
@@ -59,3 +61,45 @@ def load_log_configuration(log_config: Path, logs_dir: Path):
 
     log_fpath.parent.mkdir(parents=True, exist_ok=True)
     logging.config.dictConfig(log_config)
+
+
+def images_size(frames_dir):
+    im = Image.open(frames_dir.joinpath(f'{1:05}.jpg'))
+    width, height = im.size
+    return height, width
+
+
+def train_kmeans(x, num_clusters, max_iter, gpus=None):
+    """Trains Kmeans using FAISS in CPU or GPU"""
+
+    if gpus:
+        kmeans = faiss.Clustering(x.shape[1], num_clusters)
+        kmeans.niter = max_iter
+
+        res = {g: faiss.StandardGpuResources() for g in gpus}
+        flat_config = {}
+        for g in gpus:
+            cfg = faiss.GpuIndexFlatConfig()
+            cfg.useFloat16 = False
+            cfg.device = g
+            flat_config[g] = cfg
+
+        if len(gpus) > 1:
+            indexes = [faiss.GpuIndexFlatL2(res[g], x.shape[1], flat_config[g]) for g in gpus]
+            index = faiss.IndexReplicas()
+            for sub_index in indexes:
+                index.addIndex(sub_index)
+        else:
+            index = faiss.GpuIndexFlatL2(res[gpus[0]], x.shape[1], flat_config[gpus[0]])
+
+        # perform the training
+        kmeans.train(x, index)
+        centroids = faiss.vector_float_to_array(kmeans.centroids).reshape(num_clusters, x.shape[1])
+        labels = index.search(x, 1)[1]
+    else:
+        kmeans = faiss.Kmeans(d=x.shape[1], k=num_clusters, niter=max_iter)
+        kmeans.train(x)
+        centroids = kmeans.centroids
+        labels = kmeans.index.search(x, 1)[1]
+
+    return centroids, labels

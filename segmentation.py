@@ -6,19 +6,13 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from PIL import Image
 from imantics import Polygons
 from pixellib.torchbackend.instance import instanceSegmentation
 from skimage.io import imread
 from tqdm import tqdm
 
+from util import images_size
 from util import load_log_configuration
-
-
-def images_size(frames_dir):
-    im = Image.open(frames_dir.joinpath(f'{1:05}.jpg'))
-    width, height = im.size
-    return height, width
 
 
 def preprocess_batch(point_rend, frames, height, width):
@@ -102,11 +96,11 @@ if __name__ == '__main__':
 
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('-s', '--single_video',
-                        help='Filepath for the video to process',
-                        default=None, type=lambda p: Path(p))
+                       help='Filepath for the video to process',
+                       default=None, type=lambda p: Path(p))
     group.add_argument('-v', '--videos',
-                        help='Path for files containing a video list to process',
-                        default=None, type=lambda p: Path(p))
+                       help='Path for files containing a video list to process',
+                       default=None, type=lambda p: Path(p))
     parser.add_argument('--batch_size', required=False,
                         help='PointRend batch size (default: 8)',
                         default=8, type=int)

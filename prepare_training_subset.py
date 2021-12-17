@@ -50,9 +50,9 @@ def filter_small_players(match_path, min_calibration_confidence=0.85, max_area=4
 def match_semantic_segmentation_bboxes(bboxes, semantic_seg, idx, min_segmentation_score=0.65):
     PERSON_ID = 0
     ss_frame = [(bb, mask_cnts, score) for bb, mask_cnts, class_id, score in zip(semantic_seg[idx]['boxes'],
-                                                                          semantic_seg[idx]['masks'],
-                                                                          semantic_seg[idx]['class_ids'],
-                                                                          semantic_seg[idx]['scores']) if
+                                                                                 semantic_seg[idx]['masks'],
+                                                                                 semantic_seg[idx]['class_ids'],
+                                                                                 semantic_seg[idx]['scores']) if
                 class_id == PERSON_ID and score > min_segmentation_score]
 
     num_bboxes, num_objects = len(bboxes), len(ss_frame)

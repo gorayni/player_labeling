@@ -139,3 +139,5 @@ segmentation_logs/
 *.png
 *.svg
 *.mp4
+*.npy
+
