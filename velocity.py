@@ -24,14 +24,16 @@ from optical_flow import add_missing_borders
 from optical_flow import build_second_moment_matrix
 from optical_flow import caculate_dominant_orientation_vector
 from optical_flow import caculate_inertia_matrix_components
+from optical_flow import flow_sizes_constants
 from optical_flow import resize_to_flow_shape_and_remove_borders
 from regions import cnts_to_indices
 from regions import draw_mask
 from regions import get_patch
 from regions import scale_mask
 from segmentation import to_polygons
-from util import images_size, train_kmeans
+from util import images_size
 from util import load_log_configuration
+from util import train_kmeans
 
 
 def calculate_fixed_regions_mask(half_match_path, optical_flow_indices, num_rgb_frames, num_sampling_frames=540,
@@ -54,13 +56,14 @@ def calculate_fixed_regions_mask(half_match_path, optical_flow_indices, num_rgb_
 
     dilated_mask = np.zeros(mask.shape[:2], dtype=np.uint8)
     dilated_mask = binary_dilation(mask, disk(1), out=dilated_mask)
-    return add_missing_borders(255 * dilated_mask)
+    return 255 * dilated_mask
 
 
-def segment_fixed_regions(half_match_path, optical_flow_indices, num_rgb_frames, num_sampling_frames=540,
+def segment_fixed_regions(half_match_path, optical_flow_indices, num_rgb_frames, flow_sizes, num_sampling_frames=540,
                           gpu_devices=None):
     mask = calculate_fixed_regions_mask(half_match_path, optical_flow_indices, num_rgb_frames, num_sampling_frames,
                                         gpu_devices)
+    mask = add_missing_borders(mask, flow_sizes)
     sampling_indices = np.ceil(np.linspace(0, num_rgb_frames - 1, num=num_sampling_frames)).astype(int)
 
     idx = sampling_indices[0]
@@ -178,8 +181,9 @@ def calculate_velocity_vectors(match_path: Path, num_optical_flow_frames, num_sa
         half_match_path = match_path.joinpath(f'{half + 1}_HQ')
         frames_path = half_match_path.joinpath('frames')
 
-        rgb_shape = images_size(frames_path)[::-1]
-        fixed_regions = segment_fixed_regions(half_match_path, optical_flow_indices, num_rgb_frames,
+        rgb_shape = images_size(frames_path)
+        flow_sizes = flow_sizes_constants(rgb_shape)
+        fixed_regions = segment_fixed_regions(half_match_path, optical_flow_indices, num_rgb_frames, flow_sizes,
                                               num_sampling_frames_for_fixed_regions, gpu_devices)
 
         for idx in tqdm(range(num_rgb_frames), desc='Half-match progress', leave=True, position=0):
@@ -195,14 +199,14 @@ def calculate_velocity_vectors(match_path: Path, num_optical_flow_frames, num_sa
                 continue
 
             flow = load_flow(half_match_path, optical_flow_indices[idx])
-            flow = add_missing_borders(flow)
+            flow = add_missing_borders(flow, flow_sizes)
 
             components = caculate_inertia_matrix_components(flow)
             field_mask = field_segmentation(frames_path, semantic_seg, fixed_regions, idx, num_clusters, max_num_iters,
                                             min_area_proportion, fixed_region_min_similarity, opening_disk_radius,
                                             gpu_devices)
             field_cnt = to_polygons(field_mask)
-            field_mask = img_as_bool(resize_to_flow_shape_and_remove_borders(field_mask))
+            field_mask = img_as_bool(resize_to_flow_shape_and_remove_borders(field_mask, flow_sizes))
             flow_vectors = flow[field_mask, :]
 
             if len(flow_vectors) > 0:
@@ -211,7 +215,7 @@ def calculate_velocity_vectors(match_path: Path, num_optical_flow_frames, num_sa
             else:
                 field_vector = np.zeros(2)
 
-            scale = np.asarray([f / r for r, f in zip(rgb_shape, flow.shape[1::-1])])
+            scale = np.asarray([f / r for r, f in zip(rgb_shape[1::-1], flow.shape[1::-1])])
             dominant_vectors = []
             for bb, mask_cnts in people_bboxes:
                 scaled_bb, scaled_mask_cnts = scale_mask(bb, mask_cnts, scale)

@@ -1,45 +1,57 @@
+import cv2
 import flowiz
 import numpy as np
+from addict import Dict
 from matplotlib.colors import LinearSegmentedColormap
 from numpy import linalg as LA
-import cv2
 from skimage.transform import resize
 
+
 # These shape sizes come from the optical flow calculated using FlowNet 2.0
-RGB_SHAPE = np.asarray((877, 1560))
-ORIGINAL_FLOW_BORDERS = np.asarray((22.5, 12))
-ORIGINAL_FLOW_SHAPE = (RGB_SHAPE - 2 * ORIGINAL_FLOW_BORDERS).astype(int)
+def flow_sizes_constants(rgb_shape):
+    flow_sizes = Dict()
+    if rgb_shape[0] == 720:
+        flow_sizes = Dict()
+        flow_sizes.RGB_SHAPE = np.asarray((585, 1040))
+        flow_sizes.ORIGINAL_FLOW_BORDERS = np.asarray((8, 4.5))
+        flow_sizes.FLOW_SHAPE = np.asarray((256, 455))
+    else:
+        flow_sizes.RGB_SHAPE = np.asarray((877, 1560))
+        flow_sizes.ORIGINAL_FLOW_BORDERS = np.asarray((22.5, 12))
+        flow_sizes.FLOW_SHAPE = np.asarray((256, 472))
 
-FLOW_SHAPE = np.asarray((256, 472))
-FLOW_BORDERS = ORIGINAL_FLOW_BORDERS * FLOW_SHAPE / ORIGINAL_FLOW_SHAPE
-COMPLETE_FLOW_SHAPE = FLOW_SHAPE + np.ceil(FLOW_BORDERS).astype(int) + np.floor(FLOW_BORDERS).astype(int)
+    flow_sizes.ORIGINAL_FLOW_SHAPE = (flow_sizes.RGB_SHAPE - 2 * flow_sizes.ORIGINAL_FLOW_BORDERS).astype(int)
+    flow_sizes.FLOW_BORDERS = flow_sizes.ORIGINAL_FLOW_BORDERS * flow_sizes.FLOW_SHAPE / flow_sizes.ORIGINAL_FLOW_SHAPE
+    flow_sizes.COMPLETE_FLOW_SHAPE = flow_sizes.FLOW_SHAPE + np.ceil(flow_sizes.FLOW_BORDERS).astype(int) + np.floor(
+        flow_sizes.FLOW_BORDERS).astype(int)
+    return flow_sizes
 
 
-def restore_flow_original_size(flow):
-    flow = resize(flow, ORIGINAL_FLOW_SHAPE, anti_aliasing=False, preserve_range=True)
+def restore_flow_original_size(flow, flow_sizes):
+    flow = resize(flow, flow_sizes.ORIGINAL_FLOW_SHAPE, anti_aliasing=False, preserve_range=True)
     return cv2.copyMakeBorder(flow,
-                              np.ceil(ORIGINAL_FLOW_BORDERS[0]).astype(int),
-                              np.floor(ORIGINAL_FLOW_BORDERS[0]).astype(int),
-                              np.ceil(ORIGINAL_FLOW_BORDERS[1]).astype(int),
-                              np.floor(ORIGINAL_FLOW_BORDERS[1]).astype(int),
+                              np.ceil(flow_sizes.ORIGINAL_FLOW_BORDERS[0]).astype(int),
+                              np.floor(flow_sizes.ORIGINAL_FLOW_BORDERS[0]).astype(int),
+                              np.ceil(flow_sizes.ORIGINAL_FLOW_BORDERS[1]).astype(int),
+                              np.floor(flow_sizes.ORIGINAL_FLOW_BORDERS[1]).astype(int),
                               cv2.BORDER_CONSTANT)
 
 
-def add_missing_borders(flow):
+def add_missing_borders(flow, flow_sizes):
     return cv2.copyMakeBorder(flow,
-                              np.ceil(FLOW_BORDERS[0]).astype(int),
-                              np.floor(FLOW_BORDERS[0]).astype(int),
-                              np.ceil(FLOW_BORDERS[1]).astype(int),
-                              np.floor(FLOW_BORDERS[1]).astype(int),
+                              np.ceil(flow_sizes.FLOW_BORDERS[0]).astype(int),
+                              np.floor(flow_sizes.FLOW_BORDERS[0]).astype(int),
+                              np.ceil(flow_sizes.FLOW_BORDERS[1]).astype(int),
+                              np.floor(flow_sizes.FLOW_BORDERS[1]).astype(int),
                               cv2.BORDER_CONSTANT)
 
 
-def resize_to_flow_shape_and_remove_borders(img):
-    img = resize(img, COMPLETE_FLOW_SHAPE, anti_aliasing=False, preserve_range=True)
-    img[:np.ceil(FLOW_BORDERS[0]).astype(int), :] = 0
-    img[-np.floor(FLOW_BORDERS[0]).astype(int):, :] = 0
-    img[:, :np.ceil(FLOW_BORDERS[1]).astype(int)] = 0
-    img[:, -np.floor(FLOW_BORDERS[1]).astype(int):] = 0
+def resize_to_flow_shape_and_remove_borders(img, flow_sizes):
+    img = resize(img, flow_sizes.COMPLETE_FLOW_SHAPE, anti_aliasing=False, preserve_range=True)
+    img[:np.ceil(flow_sizes.FLOW_BORDERS[0]).astype(int), :] = 0
+    img[-np.floor(flow_sizes.FLOW_BORDERS[0]).astype(int):, :] = 0
+    img[:, :np.ceil(flow_sizes.FLOW_BORDERS[1]).astype(int)] = 0
+    img[:, -np.floor(flow_sizes.FLOW_BORDERS[1]).astype(int):] = 0
     return img
 
 
@@ -66,7 +78,6 @@ def build_second_moment_matrix(components, mask=None, indices=None):
 
 # Second Moment Matrix Method
 def caculate_dominant_orientation_vector(M, gradient_vectors):
-
     magnitude = np.trace(M) / gradient_vectors.shape[0]
 
     l, e = LA.eig(M)
