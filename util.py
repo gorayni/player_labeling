@@ -69,37 +69,44 @@ def images_size(frames_dir):
     return height, width
 
 
-def train_kmeans(x, num_clusters, max_iter, gpus=None):
-    """Trains Kmeans using FAISS in CPU or GPU"""
+class FaissKMeans:
+    def __init__(self, num_clusters, max_iter, gpu_devices=None):
+        self.num_clusters = num_clusters
+        self.max_iter = max_iter
+        self.gpu_devices = gpu_devices
+        self.kmeans = None
+        self.centroids = None
+        self.index = None
 
-    if gpus:
-        kmeans = faiss.Clustering(x.shape[1], num_clusters)
-        kmeans.niter = max_iter
+    def fit(self, x):
+        if self.gpu_devices:
+            self.kmeans = faiss.Clustering(x.shape[1], self.num_clusters)
+            self.kmeans.niter = self.max_iter
 
-        res = {g: faiss.StandardGpuResources() for g in gpus}
-        flat_config = {}
-        for g in gpus:
-            cfg = faiss.GpuIndexFlatConfig()
-            cfg.useFloat16 = False
-            cfg.device = g
-            flat_config[g] = cfg
+            res = {g: faiss.StandardGpuResources() for g in self.gpu_devices}
+            flat_config = {}
+            for g in self.gpu_devices:
+                cfg = faiss.GpuIndexFlatConfig()
+                cfg.useFloat16 = False
+                cfg.device = g
+                flat_config[g] = cfg
 
-        if len(gpus) > 1:
-            indexes = [faiss.GpuIndexFlatL2(res[g], x.shape[1], flat_config[g]) for g in gpus]
-            index = faiss.IndexReplicas()
-            for sub_index in indexes:
-                index.addIndex(sub_index)
+            if len(self.gpu_devices) > 1:
+                indexes = [faiss.GpuIndexFlatL2(res[g], x.shape[1], flat_config[g]) for g in self.gpu_devices]
+                self.index = faiss.IndexReplicas()
+                for sub_index in indexes:
+                    self.index.addIndex(sub_index)
+            else:
+                self.index = faiss.GpuIndexFlatL2(res[self.gpu_devices[0]], x.shape[1], flat_config[self.gpu_devices[0]])
+
+            # perform the training
+            self.kmeans.train(x, self.index)
+            self.centroids = faiss.vector_float_to_array(self.kmeans.centroids).reshape(self.num_clusters, x.shape[1])
         else:
-            index = faiss.GpuIndexFlatL2(res[gpus[0]], x.shape[1], flat_config[gpus[0]])
+            kmeans = faiss.Kmeans(d=x.shape[1], k=self.num_clusters, niter=self.max_iter)
+            kmeans.train(x)
+            self.centroids = kmeans.centroids
+            self.index = kmeans.index
 
-        # perform the training
-        kmeans.train(x, index)
-        centroids = faiss.vector_float_to_array(kmeans.centroids).reshape(num_clusters, x.shape[1])
-        labels = index.search(x, 1)[1]
-    else:
-        kmeans = faiss.Kmeans(d=x.shape[1], k=num_clusters, niter=max_iter)
-        kmeans.train(x)
-        centroids = kmeans.centroids
-        labels = kmeans.index.search(x, 1)[1]
-
-    return centroids, labels
+    def predict(self, x):
+        return self.index.search(x, 1)[1]

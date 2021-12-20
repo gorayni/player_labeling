@@ -1,0 +1,15 @@
+{
+  "fixed_regions": {
+    "num_sampling_frames": 540,
+    "num_clusters": 4
+  },
+  "field_segmentation": {
+    "fixed_region_min_similarity": 0.011,
+    "clustering": {
+      "num_clusters": 5,
+      "max_iter": 30
+    },
+    "opening_disk_radius": 8,
+    "min_area_proportion": 0.15
+  }
+}
