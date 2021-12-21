@@ -1,8 +1,6 @@
 import cv2
-import flowiz
 import numpy as np
 from addict import Dict
-from matplotlib.colors import LinearSegmentedColormap
 from numpy import linalg as LA
 from skimage.transform import resize
 
@@ -92,10 +90,3 @@ def caculate_dominant_orientation_vector(M, gradient_vectors):
     vector = direction * np.abs(vector)
 
     return magnitude * vector
-
-
-def flow_colormap():
-    flow = np.asarray([[np.cos(r), np.sin(r)] for r in np.linspace(0, 2 * np.pi, num=1000)])
-    flow = flow[:, np.newaxis, :]
-    rgb = flowiz.convert_from_flow(flow, 'rgb').squeeze() / 255
-    return LinearSegmentedColormap.from_list('flow', rgb)

@@ -17,7 +17,8 @@ from skimage.util import img_as_bool
 from skimage.util import img_as_ubyte
 from tqdm import tqdm
 
-from IO import load_bboxes, load_flow
+from IO import load_bboxes
+from IO import load_flow
 from IO import load_num_optical_flow_frames
 from optical_flow import add_missing_borders
 from optical_flow import build_second_moment_matrix
@@ -30,7 +31,8 @@ from regions import draw_mask
 from regions import get_patch
 from regions import scale_mask
 from segmentation import to_polygons
-from util import images_size, FaissKMeans
+from util import images_size
+from util import FaissKMeans
 from util import load_log_configuration
 
 
@@ -183,7 +185,7 @@ def velocity_vectors_from_frame(rgb, flow, rgb_shape, flow_sizes, segmented_peop
         field_vector = np.zeros(2)
 
     scale = np.asarray([f / r for r, f in zip(rgb_shape[1::-1], flow.shape[1::-1])])
-    dominant_vectors = []
+    velocity_vectors = []
     for bb, mask_cnts in segmented_people:
         scaled_bb, scaled_mask_cnts = scale_mask(bb, mask_cnts, scale)
         flow_patch = get_patch(flow, scaled_bb, copy=False)
@@ -195,9 +197,16 @@ def velocity_vectors_from_frame(rgb, flow, rgb_shape, flow_sizes, segmented_peop
         M = build_second_moment_matrix(components_patches, indices=(rr, cc))
 
         player_vector = caculate_dominant_orientation_vector(M, flow_vectors)
-        dominant_vectors.append(player_vector - field_vector)
+        velocity_vectors.append(player_vector - field_vector)
 
-    return field_cnt, field_vector, np.asarray(dominant_vectors)
+    return field_cnt, field_vector, np.asarray(velocity_vectors)
+
+
+def get_segmented_people(semantic_seg):
+    return [(bb, mask_cnts) for bb, mask_cnts, class_id in zip(semantic_seg['boxes'],
+                                                               semantic_seg['masks'],
+                                                               semantic_seg['class_ids'])
+            if class_id == 0]  # Person class ID is 0
 
 
 def velocity_vectors_from_half_match(match_path, half, num_rgb_frames, num_optical_flow_frames, fixed_regions_args,
@@ -219,15 +228,9 @@ def velocity_vectors_from_half_match(match_path, half, num_rgb_frames, num_optic
                                           fixed_regions_args.num_sampling_frames, fixed_regions_args.num_clusters,
                                           gpu_devices)
 
-    PERSON_ID = 0
-
     results = {}
     for idx in tqdm(range(num_rgb_frames), desc='Half-match progress', leave=True, position=0):
-        segmented_people = [(bb, mask_cnts) for bb, mask_cnts, class_id in zip(semantic_seg[idx]['boxes'],
-                                                                               semantic_seg[idx]['masks'],
-                                                                               semantic_seg[idx]['class_ids'])
-                            if class_id == PERSON_ID]
-
+        segmented_people = get_segmented_people(semantic_seg[idx])
         if len(segmented_people) == 0:
             continue
 
@@ -318,5 +321,5 @@ if __name__ == '__main__':
                         conf.field_segmentation,
                         args.gpu_devices)
 
-        # np.save(velocity_results_fpath, velocity)
+        np.save(velocity_results_fpath, velocity)
         logging.info(f'Match processing time is {time.time() - start} seconds')

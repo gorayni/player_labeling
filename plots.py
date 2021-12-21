@@ -1,9 +1,14 @@
 import warnings
+from functools import cache
 
+import flowiz
+import matplotlib as mpl
+import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import sklearn.metrics as metrics
+from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.colors import ListedColormap
 
 
@@ -94,4 +99,98 @@ def plot_players_cm(groundtruth, predictions, labels=None, show_title=True, show
     if show_ylabel:
         ax.set_ylabel('Groundtruth', fontsize=15, fontweight='bold')
 
+    return fig, ax
+
+
+def draw_velocity_vectors(ax, xy, velocity, field_vector, img_width, magnitude_scale=0.0025):
+    ax.quiver(xy[:, 0], xy[:, 1],
+              velocity[:, 0], velocity[:, 1],
+              color=(1, 1, 0),
+              units='xy',
+              scale=magnitude_scale,
+              width=magnitude_scale * img_width,
+              headwidth=3)
+    ax.quiver(img_width // 2, 50,
+              field_vector[0], field_vector[1],
+              color=(0, 1, 0),
+              units='xy',
+              scale=magnitude_scale,
+              width=magnitude_scale * img_width,
+              headwidth=3)
+    ax.quiver(50, 50,
+              1, 0,
+              color=(1, 1, 0),
+              units='xy',
+              scale=magnitude_scale,
+              width=0.0025 * img_width,
+              headwidth=3)
+
+
+@cache
+def flow_colormap():
+    flow = np.asarray([[np.cos(r), np.sin(r)] for r in np.linspace(0, 2 * np.pi, num=1000)])
+    flow = flow[:, np.newaxis, :]
+    rgb = flowiz.convert_from_flow(flow, 'rgb').squeeze() / 255
+    return LinearSegmentedColormap.from_list('flow', rgb)
+
+
+def plot_flow_and_masked_flow(flow_rgb, masked_flow_rgb, xy, velocity, field_vector, title=None,
+                              magnitude_scale=0.0025):
+    fig = plt.figure(figsize=(16, 15))
+    spec = gridspec.GridSpec(ncols=2, nrows=2, figure=fig, width_ratios=[9, 1])
+
+    if title:
+        fig.suptitle(title)
+
+    ax = fig.add_subplot(spec[0, 0])
+    ax.imshow(flow_rgb)
+    draw_velocity_vectors(ax, xy, velocity, field_vector, flow_rgb.shape[1], magnitude_scale)
+
+    # Adding Flow colormap
+    ax = fig.add_subplot(spec[0, 1], polar=True)
+    mpl.colorbar.ColorbarBase(ax,
+                              cmap=flow_colormap(),
+                              norm=mpl.colors.Normalize(0.0, 2 * np.pi),
+                              orientation='horizontal')
+    ax.set_axis_off()
+
+    ax = fig.add_subplot(spec[1, 0])
+    ax.imshow(masked_flow_rgb)
+    draw_velocity_vectors(ax, xy, velocity, field_vector, masked_flow_rgb.shape[1], magnitude_scale)
+
+    # Adding Flow colormap
+    ax = fig.add_subplot(spec[1, 1], polar=True)
+    mpl.colorbar.ColorbarBase(ax,
+                              cmap=flow_colormap(),
+                              norm=mpl.colors.Normalize(0.0, 2 * np.pi),
+                              orientation='horizontal')
+    ax.set_axis_off()
+    fig.tight_layout()
+    return fig, ax
+
+
+def plot_masked_flow_and_rgb(masked_flow_rgb, rgb, xy, velocity, field_vector, title=None, magnitude_scale=0.0025):
+    fig = plt.figure(figsize=(16, 15))
+    spec = gridspec.GridSpec(ncols=2, nrows=2, figure=fig, width_ratios=[9, 1])
+
+    if title:
+        fig.suptitle(title)
+
+    ax = fig.add_subplot(spec[0, 0])
+    ax.imshow(masked_flow_rgb)
+    draw_velocity_vectors(ax, xy, velocity, field_vector, masked_flow_rgb.shape[1], magnitude_scale)
+
+    # Adding Flow colormap
+    ax = fig.add_subplot(spec[0, 1], polar=True)
+    mpl.colorbar.ColorbarBase(ax,
+                              cmap=flow_colormap(),
+                              norm=mpl.colors.Normalize(0.0, 2 * np.pi),
+                              orientation='horizontal')
+    ax.set_axis_off()
+
+    ax = fig.add_subplot(spec[1, 0])
+    ax.imshow(rgb)
+    draw_velocity_vectors(ax, xy, velocity, field_vector, rgb.shape[1], magnitude_scale)
+
+    fig.tight_layout()
     return fig, ax
