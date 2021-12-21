@@ -70,7 +70,7 @@ def build_second_moment_matrix(components, mask=None, indices=None):
 
     M = uv * np.ones((2, 2))
     M[0, 0] = u
-    M[1, 1] = u
+    M[1, 1] = v
     return M
 
 
