@@ -8,19 +8,32 @@ from skimage.transform import resize
 # These shape sizes come from the optical flow calculated using FlowNet 2.0
 def flow_sizes_constants(rgb_shape):
     flow_sizes = Dict()
-    if rgb_shape[0] == 720:
+    if rgb_shape[0] == 480:
+        flow_sizes.RGB_SHAPE = np.asarray((390, 693))
+        flow_sizes.ORIGINAL_FLOW_BORDERS = np.asarray((3, 26.5))
+        flow_sizes.FLOW_SHAPE = np.asarray((256, 426))
+    elif rgb_shape[0] == 576:    
+        flow_sizes.RGB_SHAPE = np.asarray((468, 572))
+        flow_sizes.ORIGINAL_FLOW_BORDERS = np.asarray((10, 30))
+        flow_sizes.FLOW_SHAPE = np.asarray((256, 292))
+    elif rgb_shape[0] == 720:
         flow_sizes = Dict()
         flow_sizes.RGB_SHAPE = np.asarray((585, 1040))
         flow_sizes.ORIGINAL_FLOW_BORDERS = np.asarray((8, 4.5))
         flow_sizes.FLOW_SHAPE = np.asarray((256, 455))
-    elif rgb_shape[0] == 1080:
-        flow_sizes.RGB_SHAPE = np.asarray((877, 1560))
-        flow_sizes.ORIGINAL_FLOW_BORDERS = np.asarray((22.5, 12))
-        flow_sizes.FLOW_SHAPE = np.asarray((256, 472))
-    else:
+    elif rgb_shape[0] == 768:
         flow_sizes.RGB_SHAPE = np.asarray((624, 1109))
         flow_sizes.ORIGINAL_FLOW_BORDERS = np.asarray((24, 10.5))
         flow_sizes.FLOW_SHAPE = np.asarray((256, 483))
+    elif rgb_shape[0] == 1080:
+        if rgb_shape[1] == 1920:
+            flow_sizes.RGB_SHAPE = np.asarray((877, 1560))
+            flow_sizes.ORIGINAL_FLOW_BORDERS = np.asarray((22.5, 12))
+            flow_sizes.FLOW_SHAPE = np.asarray((256, 472))
+        elif rgb_shape[1] == 1440:
+            flow_sizes.RGB_SHAPE = np.asarray((877, 1170))
+            flow_sizes.ORIGINAL_FLOW_BORDERS = np.asarray((22.5, 9))
+            flow_sizes.FLOW_SHAPE = np.asarray((256, 354))
 
     flow_sizes.ORIGINAL_FLOW_SHAPE = (flow_sizes.RGB_SHAPE - 2 * flow_sizes.ORIGINAL_FLOW_BORDERS).astype(int)
     flow_sizes.FLOW_BORDERS = flow_sizes.ORIGINAL_FLOW_BORDERS * flow_sizes.FLOW_SHAPE / flow_sizes.ORIGINAL_FLOW_SHAPE
