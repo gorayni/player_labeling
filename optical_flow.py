@@ -13,10 +13,14 @@ def flow_sizes_constants(rgb_shape):
         flow_sizes.RGB_SHAPE = np.asarray((585, 1040))
         flow_sizes.ORIGINAL_FLOW_BORDERS = np.asarray((8, 4.5))
         flow_sizes.FLOW_SHAPE = np.asarray((256, 455))
-    else:
+    elif rgb_shape[0] == 1080:
         flow_sizes.RGB_SHAPE = np.asarray((877, 1560))
         flow_sizes.ORIGINAL_FLOW_BORDERS = np.asarray((22.5, 12))
         flow_sizes.FLOW_SHAPE = np.asarray((256, 472))
+    else:
+        flow_sizes.RGB_SHAPE = np.asarray((624, 1109))
+        flow_sizes.ORIGINAL_FLOW_BORDERS = np.asarray((24, 10.5))
+        flow_sizes.FLOW_SHAPE = np.asarray((256, 483))
 
     flow_sizes.ORIGINAL_FLOW_SHAPE = (flow_sizes.RGB_SHAPE - 2 * flow_sizes.ORIGINAL_FLOW_BORDERS).astype(int)
     flow_sizes.FLOW_BORDERS = flow_sizes.ORIGINAL_FLOW_BORDERS * flow_sizes.FLOW_SHAPE / flow_sizes.ORIGINAL_FLOW_SHAPE

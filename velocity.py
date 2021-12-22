@@ -254,6 +254,7 @@ def velocity_vectors_from_half_match(match_path, half, num_rgb_frames, num_optic
 
 
 def main(match_path: Path, num_optical_flow_frames, fixed_regions_args, field_segmentation_args, gpu_devices=None):
+    logging.info(f'Processing match {match_path}')
     results = {}
     for half in range(2):
         num_rgb_frames = len(load_bboxes(match_path, half))
