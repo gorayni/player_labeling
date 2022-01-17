@@ -4,14 +4,14 @@ export SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )
 
 source "$SCRIPTS_DIR"/soccernet_conf.sh
 
+model_name=""
+
 case $1 in
   velocity)
     num_process=$NUM_VELOCITY_PROCESSES
-    model_name=""
     ;;
   preliminary_player_labels)
     num_process=$NUM_LABELING_PROCESSES
-    model_name=""
     ;;
   train)
     num_process=$NUM_TRAINING_PROCESSES
@@ -19,7 +19,9 @@ case $1 in
     ;;
   segmentation)
     num_process=$NUM_SEGMENTATION_PROCESSES
-    model_name=""
+    ;;
+  team_classification)
+    num_process=$NUM_TEAM_CLASSIFICATION_PROCESSES
     ;;
 esac
 

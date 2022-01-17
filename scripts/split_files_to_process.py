@@ -11,6 +11,8 @@ def get_processed_filepath(match_path, args):
         return match_path.joinpath('player_labeling', 'weights', args.model_name, 'initial_model.pth.tar')
     elif args.file_type == 'segmentation':
         return match_path.joinpath(f'segmentation_results_{args.half+1}_HQ.npy')
+    elif args.file_type == 'team_classification':
+        return match_path.joinpath('team_classification_results.npy')
 
 
 def main(args):
