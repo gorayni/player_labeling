@@ -3,7 +3,7 @@ import logging
 import time
 from argparse import ArgumentParser
 from pathlib import Path
-
+import warnings
 import cv2
 import numpy as np
 from addict import Dict
@@ -190,7 +190,14 @@ def velocity_vectors_from_frame(rgb, flow, rgb_shape, flow_sizes, segmented_peop
         scaled_bb, scaled_mask_cnts = scale_mask(bb, mask_cnts, scale)
         flow_patch = get_patch(flow, scaled_bb, copy=False)
 
-        rr, cc = cnts_to_indices(scaled_mask_cnts)
+        if len(scaled_mask_cnts) == 0:
+            warnings.warn(f'Segmented person with bbox [{bb[0]}, {bb[1]}, {bb[2]}, {bb[3]}] has no contour')
+            rr, cc = np.indices(flow_patch.shape[0:2])
+            rr = rr.flatten()
+            cc = cc.flatten()
+        else:
+            rr, cc = cnts_to_indices(scaled_mask_cnts)
+
         flow_vectors = flow_patch[rr, cc, :]
 
         components_patches = [get_patch(c, scaled_bb, copy=False) for c in components]
