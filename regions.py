@@ -1,3 +1,4 @@
+import warnings
 from functools import partial
 
 import cv2
@@ -85,26 +86,36 @@ def to_mask(bb, contours):
     mask = np.zeros((height, width), dtype=np.uint8)
     for cnt in contours:
         rr, cc = polygon(cnt[:, 1], cnt[:, 0])
+
+        # FIXME: Polygon function sometimes exceeds the patch shape
+        indices = (rr < height) & (cc < width)
+        if len(indices) < len(rr):
+            warnings.warn(f'Generated polygon exceeds patch shape')
+        rr, cc = rr[indices], cc[indices]
+
         mask[rr, cc] = 255
     return mask
 
 
 def draw_mask(frame, bb, contours, color=None):
     x1, y1, x2, y2 = bb
-    if len(frame.shape) == 3:
-        if color is None:
-            color = np.asarray([255, 255, 255])
-        patch = frame[y1:y2, x1:x2, :]
-        for cnt in contours:
-            rr, cc = polygon(cnt[:, 1], cnt[:, 0])
-            patch[rr, cc, :] = color
-    else:
-        if color is None:
-            color = 255
-        patch = frame[y1:y2, x1:x2]
-        for cnt in contours:
-            rr, cc = polygon(cnt[:, 1], cnt[:, 0])
-            patch[rr, cc] = color
+
+    if color is None:
+        color = 255
+
+    patch = frame[y1:y2, x1:x2, ...]
+    for cnt in contours:
+        rr, cc = polygon(cnt[:, 1], cnt[:, 0])
+
+        # FIXME: Polygon function sometimes exceeds the patch shape
+        original_rr_size = len(rr)
+        rr = np.minimum(rr, patch.shape[0] - 1)
+        cc = np.minimum(cc, patch.shape[1] - 1)
+
+        if len(rr) < original_rr_size:
+            warnings.warn(f'Generated polygon exceeds patch shape')
+
+        patch[rr, cc, ...] = color
 
 
 def get_masked_patch(frame, bbox, mask_contour):

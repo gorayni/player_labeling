@@ -197,6 +197,12 @@ def velocity_vectors_from_frame(rgb, flow, rgb_shape, flow_sizes, segmented_peop
             cc = cc.flatten()
         else:
             rr, cc = cnts_to_indices(scaled_mask_cnts)
+            # FIXME: Polygon function sometimes exceeds the patch shape
+            indices = (rr < flow_patch.shape[0]) & (cc < flow_patch.shape[1])
+            if len(indices) < len(rr):
+                warnings.warn(f'Generated polygon exceeds patch shape')
+
+            rr, cc = rr[indices], cc[indices]
 
         flow_vectors = flow_patch[rr, cc, :]
 
