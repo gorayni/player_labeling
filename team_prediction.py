@@ -23,15 +23,32 @@ from tqdm import tqdm
 from IO import load_bboxes
 from regions import get_masked_patch
 from velocity import get_segmented_people
+from multiprocessing import Pool
+
+
+class MaskedPatch():
+    def __init__(self, path, masked_patch):
+        self.path = path
+        self.masked_patch = masked_patch
+
+
+def _load_masked_patches(args):
+    half, frame_idx, frame_path, segmented_people = args
+    frame = io.imread(frame_path)
+
+    masked_patches = []
+    for idx, (bb, mask_cnts) in enumerate(segmented_people):
+        masked_patch = get_masked_patch(frame, bb, mask_cnts)
+        masked_patches.append(MaskedPatch((half, frame_idx, idx), masked_patch))
+    return masked_patches
 
 
 class MaskedPatchesDataset(Dataset):
 
-    def __init__(self, match_path: Path, transform=None):
+    def __init__(self, match_path: Path, transform=None, num_processes=None):
         self.match_path = match_path
         self.transform = transform
         self.data = []
-        MaskedPatch = namedtuple("MaskedPatch", "path masked_patch")
 
         num_patches = MaskedPatchesDataset.get_num_patches(match_path)
         with tqdm(total=num_patches, desc='Loading patches progress', leave=True, position=0) as pbar:
@@ -42,18 +59,21 @@ class MaskedPatchesDataset(Dataset):
                 semantic_seg = np.load(segmentation_results_fpath, allow_pickle=True)
 
                 frames_path = match_path.joinpath(f'{half + 1}_HQ', 'frames')
-
+                
+                halves, frame_indices, frame_paths, segmented_people  = [], [], [], []
                 for frame_idx in range(num_rgb_frames):
-                    segmented_people = get_segmented_people(semantic_seg[frame_idx])
-                    if len(segmented_people) == 0:
-                        continue
-                    frame_path = frames_path.joinpath(f'{frame_idx + 1:05}.jpg')
-                    frame = io.imread(frame_path)
+                    segmented_people_in_frame = get_segmented_people(semantic_seg[frame_idx ])
+                    if len(segmented_people_in_frame) > 0:
+                        halves.append(half)
+                        frame_indices.append(frame_idx)
+                        frame_paths.append(frames_path.joinpath(f'{frame_idx + 1:05}.jpg'))
+                        segmented_people.append(segmented_people_in_frame)
 
-                    for idx, (bb, mask_cnts) in enumerate(segmented_people):
-                        masked_patch = get_masked_patch(frame, bb, mask_cnts)
-                        self.data.append(MaskedPatch((half, frame_idx, idx), masked_patch))
-                        pbar.update(1)
+                with Pool(processes=num_processes) as pool:
+
+                    for masked_patches in pool.imap_unordered(_load_masked_patches, zip(halves, frame_indices, frame_paths, segmented_people)):
+                        self.data.extend(masked_patches)
+                        pbar.update(len(masked_patches))
 
     @staticmethod
     def get_num_patches(match_path: Path):
@@ -93,7 +113,7 @@ def __init_results():
     return results
 
 
-def main(model_args, pred_args, match_path):
+def main(model_args, pred_args, match_path, num_loading_processes):
     logging.info("Parameters:")
     logging.info(model_args)
     logging.info(pred_args)
@@ -120,7 +140,7 @@ def main(model_args, pred_args, match_path):
         transforms.ToTensor()
     ])
 
-    match_dataset = MaskedPatchesDataset(match_path, transform=data_transform)
+    match_dataset = MaskedPatchesDataset(match_path, data_transform, num_loading_processes)
     loader = DataLoader(match_dataset,
                         batch_size=pred_args.batch_size,
                         shuffle=False,
@@ -134,12 +154,12 @@ def main(model_args, pred_args, match_path):
             if torch.cuda.is_available():
                 inputs = inputs.cuda()
             outputs = model(inputs)
-            outputs = outputs.cpu().detach().numpy()
+            predictions = outputs.cpu().detach().numpy()
 
             halves, frame_indices, indices = map(lambda x: x.cpu().detach().numpy(), paths)
-            categories = np.argmax(outputs, axis=1)
-            for half, frame_idx, idx, category in zip(halves, frame_indices, indices, categories):
-                results[half][frame_idx][idx] = category
+
+            for half, frame_idx, idx, prediction in zip(halves, frame_indices, indices, predictions):
+                results[half][frame_idx][idx] = prediction
     return results
 
 
@@ -154,8 +174,11 @@ def parse_args():
     group.add_argument('-m', '--matches',
                        help='Path for a file containing a matches list to process',
                        default=None, type=lambda p: Path(p))
+    parser.add_argument('--num_loading_processes', required=False,
+                        help='Number of processes to load masked patches (default: None)',
+                        default=None, type=int)
     parser.add_argument('--max_num_workers', required=False,
-                        help='number of worker to load data (default: 2)',
+                        help='Number of workers for dataloader (default: 2)',
                         default=2, type=int)
     parser.add_argument('--weights', required=False,
                         help='Weights to load (default: None)',
@@ -191,7 +214,8 @@ def parse_args():
                  'model': conf.model,
                  'prediction': prediction,
                  'logs': logs,
-                 'GPU': args.GPU})
+                 'GPU': args.GPU,
+                 'num_loading_processes': args.num_loading_processes})
 
 
 if __name__ == '__main__':
@@ -223,6 +247,6 @@ if __name__ == '__main__':
 
         start = time.time()
         logging.info('Starting main function')
-        results = main(args.model, args.prediction, match_path)
+        results = main(args.model, args.prediction, match_path, args.num_loading_processes)
         np.save(team_classification_results_fpath, results)
         logging.info(f'Total Execution Time is {time.time() - start} seconds')
