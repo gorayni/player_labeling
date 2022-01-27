@@ -53,7 +53,46 @@ conda activate player_labeling
 
 3. Change the SoccerNetV2 directory path in `scripts/soccernet_conf.sh` file
 
-# Semantic Segmentation
+4. Calculate the number of optical flow frames previously obtained by running the command:
+
+```shell
+./scripts/calculate_optical_flow_num_frames.sh
+```
+
+# Single Soccer Match
+
+In this example we assume that the SoccerNetV2 directory path is `/datasets/soccernet` and that our desired soccer match to process is `/datasets/soccernet/europe_uefa-champions-league/2014-2015/2014-11-04 - 22-45 Arsenal 3 - 3 Anderlecht/`. 
+
+
+```shell
+soccernet_path="/datasets/soccernet"
+match_path="/datasets/soccernet/europe_uefa-champions-league/2014-2015/2014-11-04 - 22-45 Arsenal 3 - 3 Anderlecht"
+```
+
+## Semantic Segmentation
+
+```shell
+python segmentation.py -s "$match_path"/1_HQ.mkv
+python segmentation.py -s "$match_path"/2_HQ.mkv
+```
+
+## Player velocity from optical flow
+
+```shell
+python velocity.py -s "$match_path" -g 0 -d "$soccernet_path"
+```
+
+## Player team classification
+
+```shell
+python prepare_training_subset.py -s "$match_path"
+python train.py -s "$match_path" -g 0
+```
+
+# Multiple Soccer Matches
+
+
+## Semantic Segmentation
 
 For the player labeling and vector direction it is necessary to semantically segment the people in each frame from the dataset. For batch processing first set the number of semantic segmentation processes running in parallel in `scripts/soccernet_conf.sh`, the default value is `NUM_SEGMENTATION_PROCESSES=2`. 
 
@@ -70,8 +109,9 @@ For each temporal file we extract the semantic segmentation by executing a comma
 ```shell
 python segmentation.py -v tmp_videos_file_aa
 ```
+## Player velocity from optical flow
 
-# Player Labeling
+## Player team classification
 
 ```shell
 ./scripts/split_remaining_matches_to_label.sh
@@ -79,13 +119,4 @@ python segmentation.py -v tmp_videos_file_aa
 
 ```shell
 python prepare_training_subset.py -m tmp_matches_file_aa
-```
-
-# Optical Flow Vector
-
-
-# Single video
-
-```shell
-python segmentation.py -s '/datasets/soccernet/england_epl/2014-2015/2015-02-21 - 18-00 Chelsea 1 - 1 Burnley/1_HQ.mkv' 
 ```

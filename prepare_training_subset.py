@@ -247,7 +247,7 @@ def extract_preliminary_labels(match_path, player_bboxes, min_segmentation_score
     labels = filter_class_instances(labels, color_hist_threshold)
 
     if save:
-        labels_path = match_path.joinpath('labels.pkl')
+        labels_path = match_path.joinpath('player_labeling', 'labels.pkl')
         with labels_path.open(mode='wb') as fid:
             pickle.dump(labels, fid)
     return labels

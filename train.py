@@ -180,8 +180,6 @@ def main(model_args, opt_args, train_args):
 
 def parse_args():
     parser = ArgumentParser(description='Players labeling training')
-    parser.add_argument('conf', help='JSON model configuration filepath',
-                        type=lambda p: Path(p))
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('-s', '--single_match',
                        help='Directory path for the match to process (default: None)',
@@ -189,6 +187,9 @@ def parse_args():
     group.add_argument('-m', '--matches',
                        help='Path for a file containing a matches list to process',
                        default=None, type=lambda p: Path(p))
+    parser.add_argument('-c', '--conf', required=False,
+                        help='JSON configuration filepath (default: config/velocity.json)',
+                        default="config/training.json", type=lambda p: Path(p))
     parser.add_argument('--max_num_workers', required=False,
                         help='number of worker to load data (default: 2)',
                         default=2, type=int)
@@ -198,7 +199,7 @@ def parse_args():
     parser.add_argument('--weights', required=False,
                         help='Weights to load (default: None)',
                         default=None, type=str)
-    parser.add_argument('--GPU', required=False,
+    parser.add_argument('-g', '--GPU', required=False,
                         help='ID of the GPU to use (default: -1)',
                         default=-1, type=int)
     parser.add_argument('--log_config', required=False,
