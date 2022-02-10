@@ -2,7 +2,7 @@
 
 fname=$(basename "$1");
 dname=$(dirname "$1");
-
+frames_dir="$2"
 
 scale="1.0"
 iext="jpg"
@@ -21,17 +21,11 @@ else
   duration_time=`python3 -c 'import datetime; print(str(datetime.timedelta(seconds = '"$duration"')))'`    
 fi
 
-sar=`ffprobe -v error -select_streams v:0 -show_entries stream=sample_aspect_ratio -of default=noprint_wrappers=1:nokey=1 "$1"`
-dar=`ffprobe -v error -select_streams v:0 -show_entries stream=display_aspect_ratio -of default=noprint_wrappers=1:nokey=1 "$1"`
-
-width=`ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 "$1"`
-height=`ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "$1"`
-
 scale_h="$scale"
-if [ $sar != "N/A" ] && [ $dar != "N/A" ]; then
-  sar=`echo "$sar" | tr ':' '/'`
-  dar=`echo "$dar" | tr ':' '/'`
-  scale_w=`python3 -c 'import math; sar='"$sar"'; dar='"$dar"'; aspect_ratio= '"$width"'/'"$height"'; par=dar/sar; scale = '"$scale"' if sar == 1 or math.isclose(par, aspect_ratio) else '"$scale"'*par; print(scale)'`
+sar=`ffprobe -v error -select_streams v:0 -show_entries stream=sample_aspect_ratio -of default=noprint_wrappers=1:nokey=1 "$1"`
+if [ $sar != "N/A" ]; then
+  sar=`echo "$sar" | tr ':' '/'`  
+  scale_w=`python3 -c 'sar='"$sar"'; print(1 if sar <= 1 else '"$scale"'*sar)'`
 else
   scale_w="$scale"
 fi

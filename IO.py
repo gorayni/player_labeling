@@ -4,6 +4,10 @@ import uuid
 from enum import Enum, unique
 from pathlib import Path
 
+from functools import reduce
+from operator import truediv
+
+
 import numpy as np
 from skimage import io
 
@@ -44,6 +48,14 @@ def load_num_optical_flow_frames(dataset_path: Path):
                                                                             int(r["num_frames_second_half"])] for r
                                    in csv_reader}
     return num_optical_flow_frames
+
+
+def load_sampling_aspect_ratios(dataset_path: Path):
+    sars_filepath = dataset_path.joinpath('sampling_aspect_ratio.csv')
+    with sars_filepath.open(mode='r') as csv_file:
+        csv_reader = csv.DictReader(csv_file)
+        sars = {dataset_path.joinpath(r["match_path"]): reduce(truediv, map(float, r["SAR"].split(':'))) for r in csv_reader}
+    return sars
 
 
 def load_flow(half_match_path, idx):

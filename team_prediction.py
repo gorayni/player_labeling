@@ -4,8 +4,8 @@ import logging.config
 import os
 import time
 from argparse import ArgumentParser
-from collections import namedtuple
 from datetime import datetime
+from multiprocessing import Pool
 from pathlib import Path
 
 import numpy as np
@@ -23,7 +23,6 @@ from tqdm import tqdm
 from IO import load_bboxes
 from regions import get_masked_patch
 from velocity import get_segmented_people
-from multiprocessing import Pool
 
 
 class MaskedPatch():
@@ -175,8 +174,8 @@ def parse_args():
                        help='Path for a file containing a matches list to process',
                        default=None, type=lambda p: Path(p))
     parser.add_argument('--num_loading_processes', required=False,
-                        help='Number of processes to load masked patches (default: None)',
-                        default=None, type=int)
+                        help='Number of processes to load masked patches (default: 1)',
+                        default=1, type=int)
     parser.add_argument('--max_num_workers', required=False,
                         help='Number of workers for dataloader (default: 2)',
                         default=2, type=int)
@@ -247,6 +246,9 @@ if __name__ == '__main__':
 
         start = time.time()
         logging.info('Starting main function')
-        results = main(args.model, args.prediction, match_path, args.num_loading_processes)
-        np.save(team_classification_results_fpath, results)
+        try:
+            results = main(args.model, args.prediction, match_path, args.num_loading_processes)
+            np.save(team_classification_results_fpath, results)
+        except Exception as e:
+            logging.info(f'An exception occurred: {e}')
         logging.info(f'Total Execution Time is {time.time() - start} seconds')

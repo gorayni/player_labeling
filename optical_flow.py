@@ -13,9 +13,9 @@ def flow_sizes_constants(rgb_shape):
         flow_sizes.ORIGINAL_FLOW_BORDERS = np.asarray((3, 26.5))
         flow_sizes.FLOW_SHAPE = np.asarray((256, 426))
     elif rgb_shape[0] == 576:
-        flow_sizes.RGB_SHAPE = np.asarray((468, 699))
-        flow_sizes.ORIGINAL_FLOW_BORDERS = np.asarray((10, 29.5))
-        flow_sizes.FLOW_SHAPE = np.asarray((256, 365))
+        flow_sizes.RGB_SHAPE = np.asarray((468, 832))
+        flow_sizes.ORIGINAL_FLOW_BORDERS = np.asarray((10, 0))
+        flow_sizes.FLOW_SHAPE = np.asarray((256, 475))
     elif rgb_shape[0] == 768:
         flow_sizes.RGB_SHAPE = np.asarray((624, 1109))
         flow_sizes.ORIGINAL_FLOW_BORDERS = np.asarray((24, 10.5))

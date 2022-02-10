@@ -15,6 +15,7 @@ from tqdm import tqdm
 from IO import Players
 from IO import load_bboxes
 from IO import load_calibration
+from IO import load_sampling_aspect_ratios
 from field_calibration import GOAL_CENTERS
 from field_calibration import calculate_dist_from_goals
 from field_calibration import calculate_radar_position
@@ -47,13 +48,16 @@ def filter_small_players(match_path, min_calibration_confidence=0.85, max_area=4
     return small_players
 
 
-def match_semantic_segmentation_bboxes(bboxes, semantic_seg, idx, min_segmentation_score=0.65):
+def match_semantic_segmentation_bboxes(bboxes, semantic_seg, idx, min_segmentation_score=0.65, sar=1):
     PERSON_ID = 0
     ss_frame = [(bb, mask_cnts, score) for bb, mask_cnts, class_id, score in zip(semantic_seg[idx]['boxes'],
                                                                                  semantic_seg[idx]['masks'],
                                                                                  semantic_seg[idx]['class_ids'],
                                                                                  semantic_seg[idx]['scores']) if
                 class_id == PERSON_ID and score > min_segmentation_score]
+
+    if sar > 1:
+        bboxes = [[bb[0], sar*bb[1], bb[2], sar*bb[3]] for bb in bboxes] 
 
     num_bboxes, num_objects = len(bboxes), len(ss_frame)
     iou_scores = np.asarray(
@@ -77,7 +81,7 @@ def calculate_masked_patch_hist(frame, mask_bb, mask_cnt, erosion_disk_radius=2,
     return calculate_patch_hist(patch, mask, hist_type)
 
 
-def extract_midfielders_blobs(match_path, player_bboxes, min_segmentation_score=0.65, min_dist_to_goals=20,
+def extract_midfielders_blobs(match_path, player_bboxes, sar, min_segmentation_score=0.65, min_dist_to_goals=20,
                               min_player_bb_area=1000, erosion_disk_radius=2, hist_type='rgb'):
     players_blobs = {0: {}, 1: {}}
     for half in range(2):
@@ -94,7 +98,7 @@ def extract_midfielders_blobs(match_path, player_bboxes, min_segmentation_score=
             if any(d < min_dist_to_goals for d in distances):
                 continue
 
-            bboxes_masks = match_semantic_segmentation_bboxes(bboxes, semantic_seg, idx, min_segmentation_score)
+            bboxes_masks = match_semantic_segmentation_bboxes(bboxes, semantic_seg, idx, min_segmentation_score, sar)
 
             players_blobs[half][idx] = list()
             frame_path = frames_dir.joinpath(f'{idx + 1:05}.jpg')
@@ -146,7 +150,7 @@ def label_midfielders(players_blobs_by_half, min_prob_density=1.):
     return reorder_labels(labels, labels_count)
 
 
-def extract_goalkeeper(match_path, half, semantic_seg, goal_center, category, player_bboxes, labels,
+def extract_goalkeeper(match_path, half, semantic_seg, sar, goal_center, category, player_bboxes, labels,
                        min_segmentation_score=0.65, min_goalkeeper_and_goal_dist=5, min_dist_to_goalkeeper=2.5,
                        min_player_bb_area=1000, erosion_disk_radius=2, hist_type='rgb'):
     half_match_calibration = load_calibration(match_path, half)
@@ -156,7 +160,7 @@ def extract_goalkeeper(match_path, half, semantic_seg, goal_center, category, pl
 
         homography = load_homography(half_match_calibration[idx][0]["homography"])
 
-        bboxes_masks = match_semantic_segmentation_bboxes(bboxes, semantic_seg, idx, min_segmentation_score)
+        bboxes_masks = match_semantic_segmentation_bboxes(bboxes, semantic_seg, idx, min_segmentation_score, sar)
         if len(bboxes_masks) == 0:
             continue
 
@@ -183,7 +187,7 @@ def extract_goalkeeper(match_path, half, semantic_seg, goal_center, category, pl
         labels[half][idx] = [(bb, mask_bb, mask_cnt, hist, category)]
 
 
-def extract_goalkeepers(match_path, player_bboxes, min_segmentation_score=0.65, min_goalkeeper_and_goal_dist=5,
+def extract_goalkeepers(match_path, player_bboxes, sar=1, min_segmentation_score=0.65, min_goalkeeper_and_goal_dist=5,
                         min_dist_to_goalkeeper=2.5, min_player_bb_area=1000, erosion_disk_radius=2, hist_type='rgb'):
     labels = {0: {}, 1: {}}
     for half in range(2):
@@ -192,7 +196,7 @@ def extract_goalkeepers(match_path, player_bboxes, min_segmentation_score=0.65, 
 
         for i, goalkeeper in enumerate([Players.GOALKEEPER_1, Players.GOALKEEPER_2]):
             goal_center = GOAL_CENTERS[(half + i) % 2, :]
-            extract_goalkeeper(match_path, half, semantic_seg, goal_center, goalkeeper.value, player_bboxes,
+            extract_goalkeeper(match_path, half, semantic_seg, sar, goal_center, goalkeeper.value, player_bboxes,
                                labels, min_segmentation_score, min_goalkeeper_and_goal_dist, min_dist_to_goalkeeper,
                                min_player_bb_area, erosion_disk_radius, hist_type)
     return labels
@@ -221,11 +225,12 @@ def filter_class_instances(labels, color_hist_threshold=0.4):
     return filtered_labels
 
 
-def extract_preliminary_labels(match_path, player_bboxes, min_segmentation_score, min_gmm_prob_density,
+def extract_preliminary_labels(match_path, player_bboxes, sar, min_segmentation_score, min_gmm_prob_density,
                                min_dist_to_goals, min_player_bb_area, erosion_disk_radius, hist_type,
                                min_goalkeeper_and_goal_dist, min_dist_to_goalkeeper, color_hist_threshold, save=True):
     midfielders_blobs = extract_midfielders_blobs(match_path,
                                                   player_bboxes,
+                                                  sar,
                                                   min_segmentation_score,
                                                   min_dist_to_goals,
                                                   min_player_bb_area,
@@ -236,6 +241,7 @@ def extract_preliminary_labels(match_path, player_bboxes, min_segmentation_score
 
     goalkeepers = extract_goalkeepers(match_path,
                                       player_bboxes,
+                                      sar,
                                       min_segmentation_score,
                                       min_goalkeeper_and_goal_dist,
                                       min_dist_to_goalkeeper,
@@ -306,6 +312,8 @@ def main(args):
     else:
         match_paths = [args.single_match]
 
+    sampling_aspect_ratios = load_sampling_aspect_ratios(args.dataset_path)
+
     for match_path in tqdm(match_paths, desc='Overall Progress', leave=True, position=0):
         labels_path = match_path.joinpath('player_labeling', 'labels.pkl')
 
@@ -315,6 +323,7 @@ def main(args):
         if not labels_path.exists():
             labels = extract_preliminary_labels(match_path,
                                                 players_bboxes,
+                                                sampling_aspect_ratios[match_path],
                                                 args.min_segmentation_score,
                                                 args.min_gmm_prob_density,
                                                 args.min_dist_to_goals,
@@ -340,6 +349,9 @@ def parse_args():
     group.add_argument('-m', '--matches',
                        help='Path for a file containing a matches list to process',
                        default=None, type=lambda p: Path(p))
+    parser.add_argument('-d', '--dataset_path', required=False,
+                        help='Path for SoccerNet dataset (default: data/soccernet)',
+                        default="data/soccernet", type=lambda p: Path(p))
     parser.add_argument('--min_calibration_confidence',
                         help='Minimum calibration confidence for filtering players (default: 0.85)',
                         default=0.85, type=float)

@@ -59,6 +59,12 @@ conda activate player_labeling
 ./scripts/calculate_optical_flow_num_frames.sh
 ```
 
+5. Calculate the sampling aspect ratio of the videos by running the command:
+
+```shell
+./scripts/calculate_sampling_aspect_ratios.sh
+```
+
 # Single Soccer Match
 
 In this example we assume that the SoccerNetV2 directory path is `/datasets/soccernet` and that our desired soccer match to process is `/datasets/soccernet/europe_uefa-champions-league/2014-2015/2014-11-04 - 22-45 Arsenal 3 - 3 Anderlecht/`. 
@@ -69,24 +75,31 @@ soccernet_path="/datasets/soccernet"
 match_path="/datasets/soccernet/europe_uefa-champions-league/2014-2015/2014-11-04 - 22-45 Arsenal 3 - 3 Anderlecht"
 ```
 
-## Semantic Segmentation
+### Semantic Segmentation
 
 ```shell
 python segmentation.py -s "$match_path"/1_HQ.mkv
 python segmentation.py -s "$match_path"/2_HQ.mkv
 ```
 
-## Player velocity from optical flow
+### Player velocity from optical flow
 
 ```shell
 python velocity.py -s "$match_path" -g 0 -d "$soccernet_path"
 ```
 
-## Player team classification
+### Player team classification
 
 ```shell
 python prepare_training_subset.py -s "$match_path"
 python train.py -s "$match_path" -g 0
+python team_prediction.py config/training.json --GPU 0 --num_loading_processes 10 -s "$match_path"
+```
+
+### Joining the results
+
+```shell
+python join_results.py -s "$match_path"
 ```
 
 # Multiple Soccer Matches

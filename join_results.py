@@ -1,7 +1,10 @@
+import logging.config
 from argparse import ArgumentParser
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import yaml
 from addict import Dict
 from tqdm import tqdm
 
@@ -11,7 +14,7 @@ from IO import load_bboxes
 def get_segmented_people(semantic_seg):
     bboxes, scores = [], []
     for bb, score, class_id in zip(semantic_seg['boxes'], semantic_seg['scores'], semantic_seg['class_ids']):
-        if class_id != 0: # Person class ID is 0
+        if class_id != 0:  # Person class ID is 0
             continue
         bboxes.append(bb)
         scores.append(score)
@@ -19,11 +22,10 @@ def get_segmented_people(semantic_seg):
     return bboxes, scores
 
 
-def main(match_path):
+def join_results(match_path):
     velocity_results = np.load(match_path.joinpath('velocity_results.npy'), allow_pickle=True).item()
     team_classification_results = np.load(match_path.joinpath(f'team_classification_results.npy'),
                                           allow_pickle=True).item()
-
     people = {}
     for half in range(0, 2):
         num_rgb_frames = len(load_bboxes(match_path, half))
@@ -54,7 +56,14 @@ def parse_args():
     group.add_argument('-m', '--matches',
                        help='Path for a file containing a matches list to process',
                        default=None, type=lambda p: Path(p))
+    parser.add_argument('--log_config', required=False,
+                        help='Logging configuration file (default: config/log_config.yml)',
+                        default="config/log_config.yml", type=lambda p: Path(p))
     args = parser.parse_args()
+
+    with open(args.log_config, 'rt') as f:
+        log_config = yaml.safe_load(f.read())
+    logs = Dict({'log_config': log_config})
 
     if args.matches:
         with args.matches.open() as f:
@@ -62,15 +71,26 @@ def parse_args():
     else:
         match_paths = [args.single_match]
 
-    return Dict({'match_paths': match_paths})
+    return Dict({'match_paths': match_paths,
+                 'logs': logs})
 
 
 if __name__ == '__main__':
     args = parse_args()
 
+    log_fname = datetime.now().strftime('%Y-%m-%d_%H-%M-%S_prediction.log')
+    log_fpath = Path(f'logs/{log_fname}')
+    args.logs.log_config['handlers']['file_handler']['filename'] = str(log_fpath)
+
+    log_fpath.parent.mkdir(parents=True, exist_ok=True)
+    logging.config.dictConfig(args.logs.log_config)
+
     for match_path in tqdm(args.match_paths, desc='Overall Progress', leave=True, position=0):
         joined_results_fpath = match_path.joinpath(f'player_velocity_team_results.npy')
         if joined_results_fpath.exists():
             continue
-        results = main(match_path)
-        np.save(joined_results_fpath, results)
+        try:        
+            results = join_results(match_path)
+            np.save(joined_results_fpath, results)
+        except Exception as e:
+            logging.info(f'An exception occurred for match {match_path}: {e}')

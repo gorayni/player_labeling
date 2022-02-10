@@ -242,7 +242,7 @@ def velocity_vectors_from_half_match(match_path, half, num_rgb_frames, num_optic
                                           gpu_devices)
 
     results = {}
-    for idx in tqdm(range(num_rgb_frames), desc='Half-match progress', leave=True, position=0):
+    for idx in tqdm(range(num_rgb_frames), desc=f'Half-match {half + 1} progress', leave=True, position=0):
         segmented_people = get_segmented_people(semantic_seg[idx])
         if len(segmented_people) == 0:
             continue
