@@ -142,8 +142,10 @@ def initial_training(model_args, opt_args, train_args, model):
     writer = SummaryWriter(train_args.log_dir, train_args.initial_comment)
 
     Loaders = namedtuple('Loaders', 'train valid')
-    train_loader = get_dir_loader('data/train', opt_args.batch_size, train_args.max_num_workers)
-    valid_loader = get_dir_loader('data/valid', opt_args.batch_size, train_args.max_num_workers)
+
+    
+    train_loader = get_dir_loader(train_args.training_path, opt_args.batch_size, train_args.max_num_workers)
+    valid_loader = get_dir_loader(train_args.validation_path, opt_args.batch_size, train_args.max_num_workers)
     train(Loaders(train_loader, valid_loader), model, optimizer, scheduler, criterion, writer,
           model_args.initial_weights_path, opt_args.max_epochs, train_args.evaluation_frequency)
 
@@ -252,6 +254,8 @@ if __name__ == '__main__':
         args.model.initial_weights_path = args.model.weights_dir.joinpath("initial_model.pth.tar")
 
         args.training.data_path = match_path.joinpath('player_labeling', 'data')
+        args.training.training_path = args.training.data_path.joinpath('train')
+        args.training.validation_path = args.training.data_path.joinpath('valid')
         args.training.log_dir = args.model.weights_dir.joinpath('runs', args.training.initial_comment),
 
         log_fname = datetime.now().strftime('%Y-%m-%d_%H-%M-%S.log')
