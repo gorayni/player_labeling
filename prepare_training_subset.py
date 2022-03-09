@@ -1,4 +1,5 @@
 import argparse
+import logging
 import pickle
 import shutil
 from itertools import product
@@ -26,6 +27,7 @@ from regions import get_masked_patch
 from regions import get_patch
 from regions import iou
 from regions import to_mask
+from util import load_log_configuration
 
 
 def filter_small_players(match_path, min_calibration_confidence=0.85, max_area=40000):
@@ -57,7 +59,7 @@ def match_semantic_segmentation_bboxes(bboxes, semantic_seg, idx, min_segmentati
                 class_id == PERSON_ID and score > min_segmentation_score]
 
     if sar > 1:
-        bboxes = [[bb[0], sar*bb[1], bb[2], sar*bb[3]] for bb in bboxes] 
+        bboxes = [[bb[0], sar * bb[1], bb[2], sar * bb[3]] for bb in bboxes]
 
     num_bboxes, num_objects = len(bboxes), len(ss_frame)
     iou_scores = np.asarray(
@@ -315,29 +317,37 @@ def main(args):
     sampling_aspect_ratios = load_sampling_aspect_ratios(args.dataset_path)
 
     for match_path in tqdm(match_paths, desc='Overall Progress', leave=True, position=0):
-        labels_path = match_path.joinpath('player_labeling', 'labels.pkl')
 
-        players_bboxes = filter_small_players(match_path,
-                                              args.min_calibration_confidence,
-                                              args.max_player_area)
-        if not labels_path.exists():
-            labels = extract_preliminary_labels(match_path,
-                                                players_bboxes,
-                                                sampling_aspect_ratios[match_path],
-                                                args.min_segmentation_score,
-                                                args.min_gmm_prob_density,
-                                                args.min_dist_to_goals,
-                                                args.min_player_bb_area,
-                                                args.erosion_disk_radius,
-                                                args.hist_type,
-                                                args.min_goalkeeper_and_goal_dist,
-                                                args.min_dist_to_goalkeeper,
-                                                args.color_hist_threshold)
-        else:
-            with labels_path.open(mode='rb') as fid:
-                labels = pickle.load(fid)
+        player_labeling_dir = match_path.joinpath('player_labeling')
+        player_labeling_dir.mkdir(parents=True, exist_ok=True)
 
-        create_training_splits(match_path, labels, args.validation_proportion)
+        labels_path = player_labeling_dir.joinpath('labels.pkl')
+
+        try:
+            players_bboxes = filter_small_players(match_path,
+                                                  args.min_calibration_confidence,
+                                                  args.max_player_area)
+            if not labels_path.exists():
+                labels = extract_preliminary_labels(match_path,
+                                                    players_bboxes,
+                                                    sampling_aspect_ratios[match_path],
+                                                    args.min_segmentation_score,
+                                                    args.min_gmm_prob_density,
+                                                    args.min_dist_to_goals,
+                                                    args.min_player_bb_area,
+                                                    args.erosion_disk_radius,
+                                                    args.hist_type,
+                                                    args.min_goalkeeper_and_goal_dist,
+                                                    args.min_dist_to_goalkeeper,
+                                                    args.color_hist_threshold)
+            else:
+                logging.info(f'Labels.pkl exists for match {match_path}')
+                with labels_path.open(mode='rb') as fid:
+                    labels = pickle.load(fid)
+
+            create_training_splits(match_path, labels, args.validation_proportion)
+        except Exception as e:
+            logging.info(f'An exception occurred {e} for match {match_path}')
 
 
 def parse_args():
@@ -354,7 +364,7 @@ def parse_args():
                         default="data/soccernet", type=lambda p: Path(p))
     parser.add_argument('--min_calibration_confidence',
                         help='Minimum calibration confidence for filtering players (default: 0.85)',
-                        default=0.85, type=float)
+                        default=0.75, type=float)
     parser.add_argument('--max_player_area',
                         help='Maximum player area for filtering players (default: 40,000)',
                         default=40000, type=float)
@@ -391,8 +401,16 @@ def parse_args():
                         default=0.1, type=float)
     parser.add_argument('--seed', help='random seed (default: 42)',
                         default=42, type=int)
+    parser.add_argument('--logs_dir', required=False,
+                        help='Path for logging directory (default: velocity_logs)',
+                        default="velocity_logs", type=lambda p: Path(p))
+    parser.add_argument('--log_config', required=False,
+                        help='Logging configuration file (default: config/log_config.yml)',
+                        default="config/log_config.yml", type=lambda p: Path(p))
     return parser.parse_args()
 
 
 if __name__ == '__main__':
-    main(parse_args())
+    args = parse_args()
+    load_log_configuration(args.log_config, args.logs_dir)
+    main(args)
