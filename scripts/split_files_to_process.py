@@ -6,7 +6,7 @@ def get_processed_filepath(match_path, args):
     if args.file_type == 'velocity':
         return match_path.joinpath('velocity_results.npy')
     elif args.file_type == 'preliminary_player_labels':
-        return match_path.joinpath('preliminary_player_labels.npy')
+        return match_path.joinpath('player_labeling', 'labels.pkl')
     elif args.file_type == 'train':
         return match_path.joinpath('player_labeling', 'weights', args.model_name, 'initial_model.pth.tar')
     elif args.file_type == 'segmentation':

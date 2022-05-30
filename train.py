@@ -253,10 +253,13 @@ if __name__ == '__main__':
         args.model.weights_dir = weights_dir.joinpath(args.model.name)
         args.model.initial_weights_path = args.model.weights_dir.joinpath("initial_model.pth.tar")
 
+        if args.model.initial_weights_path.exists():
+            continue
+
         args.training.data_path = match_path.joinpath('player_labeling', 'data')
         args.training.training_path = args.training.data_path.joinpath('train')
         args.training.validation_path = args.training.data_path.joinpath('valid')
-        args.training.log_dir = args.model.weights_dir.joinpath('runs', args.training.initial_comment),
+        args.training.log_dir = args.model.weights_dir.joinpath('runs', args.training.initial_comment)
 
         log_fname = datetime.now().strftime('%Y-%m-%d_%H-%M-%S.log')
         log_fpath = args.model.weights_dir.joinpath('logs', log_fname)
@@ -267,5 +270,9 @@ if __name__ == '__main__':
 
         start = time.time()
         logging.info('Starting main function')
-        main(args.model, args.optimization, args.training)
+        try:
+            main(args.model, args.optimization, args.training)
+        except Exception as e:
+            logging.info(f'An exception occurred: {e}')
+
         logging.info(f'Total Execution Time is {time.time() - start} seconds')

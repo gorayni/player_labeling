@@ -230,6 +230,8 @@ if __name__ == '__main__':
         if team_classification_results_fpath.exists():
             continue
 
+        logging.info(str(match_path))
+
         if not args.prediction.weigths:
             weights_dir = match_path.joinpath('player_labeling', 'weights')
             args.model.weights_dir = weights_dir.joinpath(args.model.name)

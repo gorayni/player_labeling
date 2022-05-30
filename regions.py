@@ -2,12 +2,47 @@ import warnings
 from functools import partial
 
 import cv2
+import colour
 import numpy as np
 from addict import Dict
 from skimage.draw import polygon
 
 rgb2hsv = partial(cv2.cvtColor, code=cv2.COLOR_RGB2HSV)
 rgb2lab = partial(cv2.cvtColor, code=cv2.COLOR_RGB2LAB)
+
+
+def bhattacharyya_distance(u, v):
+    return cv2.compareHist(u, v, cv2.HISTCMP_BHATTACHARYYA)
+
+
+def rgb2xyz(rgb):
+    height, width = rgb.shape[:2]
+    rgb = rgb.reshape((height * width, 3))
+
+    illuminant_RGB = np.array([0.31270, 0.32900])
+    illuminant_XYZ = np.array([0.34570, 0.35850])
+
+    matrix_RGB_to_XYZ = np.array(
+        [[0.41240000, 0.35760000, 0.18050000],
+         [0.21260000, 0.71520000, 0.07220000],
+         [0.01930000, 0.11920000, 0.95050000]]
+    )
+    chromatic_adaptation_transform = 'Bradford'
+    xyz = colour.RGB_to_XYZ(rgb, illuminant_RGB, illuminant_XYZ, matrix_RGB_to_XYZ, chromatic_adaptation_transform)
+    return xyz.reshape((height, width, 3))
+
+
+def rgb2oklab(rgb):
+    rgb = rgb.astype(np.float32) / 255
+    xyz = rgb2xyz(rgb)
+    height, width = xyz.shape[:2]
+    oklab = colour.XYZ_to_Oklab(xyz)
+    oklab = oklab.reshape((height, width, 3))
+    oklab[:, :, 0] = oklab[:, :, 0] * 100
+    oklab[:, :, 1] = oklab[:, :, 1] * 127 + 127
+    oklab[:, :, 2] = oklab[:, :, 1] * 127 + 127
+    oklab = np.clip(oklab, 0, 255).astype(np.uint8)
+    return oklab
 
 
 def area(bbox):
@@ -60,9 +95,12 @@ def calculate_hist(img, mask=None, hist_type='rgb'):
                          'lab': {'channels': [0, 1, 2],
                                  'grid': [8, 8, 8],
                                  'values_ranges': [0, 256, 0, 256, 0, 256]},
-                         'ab': {'channels': [0, 1],
+                         'ab': {'channels': [1, 2],
                                 'grid': [8, 8],
                                 'values_ranges': [0, 256, 0, 256]},
+                         'oklab': {'channels': [1, 2],
+                                   'grid': [8, 8],
+                                   'values_ranges': [0, 256, 0, 256]},
                          })
     if options := hist_options.get(hist_type, None):
         hist = cv2.calcHist([img], options.channels, mask, options.grid, options.values_ranges)
@@ -129,6 +167,8 @@ def calculate_patch_hist(patch, mask=None, hist_type='rgb'):
         patch = rgb2hsv(patch)
     elif hist_type == 'lab' or hist_type == 'ab':
         patch = rgb2lab(patch)
+    elif hist_type == 'oklab':
+        patch = rgb2oklab(patch)
     return calculate_hist(patch, mask, hist_type)
 
 

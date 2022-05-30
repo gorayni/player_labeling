@@ -85,7 +85,7 @@ python segmentation.py -s "$match_path"/2_HQ.mkv
 ### Player velocity from optical flow
 
 ```shell
-python velocity.py -s "$match_path" -g 0 -d "$soccernet_path"
+python velocity.py -g 0 -d "$soccernet_path" -s "$match_path"
 ```
 
 ### Player team classification
@@ -104,32 +104,42 @@ python join_results.py -s "$match_path"
 
 # Multiple Soccer Matches
 
+All the tasks can be processed in parallel. The number of parallel processes for each task is defined in the script `scripts/soccernet_conf.sh`. For instance, the number of parallel semantic segmentation processes is defined as `NUM_SEGMENTATION_PROCESSES=2`. After defining an adequate number of parallel processes for a given task, the first step is determining the remaining matches to process and split them in text files. The second step is to process each generated text file in parallel.
 
-## Semantic Segmentation
 
-For the player labeling and vector direction it is necessary to semantically segment the people in each frame from the dataset. For batch processing first set the number of semantic segmentation processes running in parallel in `scripts/soccernet_conf.sh`, the default value is `NUM_SEGMENTATION_PROCESSES=2`. 
-
-The next step is to split a list videos to segment for each process:
+### Semantic Segmentation
 
 ```shell
-./scripts/split_remaining_videos_to_segment.sh
+scripts/split_files_to_process.sh segmentation
+python segmentation.py -v tmp_segmentation_file_aa
 ```
 
-This will create a number of `NUM_SEGMENTATION_PROCESSES` files containing the videos to process with names starting with the prefix `tmp_video_file_`
-
-For each temporal file we extract the semantic segmentation by executing a command like this:
+### Player velocity from optical flow
 
 ```shell
-python segmentation.py -v tmp_videos_file_aa
+scripts/split_files_to_process.sh velocity
+python velocity.py -g 0 -d "$soccernet_path" -m tmp_velocity_file_aa
 ```
-## Player velocity from optical flow
 
-## Player team classification
+### Player team classification
 
 ```shell
-./scripts/split_remaining_matches_to_label.sh
+scripts/split_files_to_process.sh preliminary_player_labels
+python prepare_training_subset.py -d "$soccernet_path" -m tmp_preliminary_player_labels_file_aa
 ```
 
 ```shell
-python prepare_training_subset.py -m tmp_matches_file_aa
+scripts/split_files_to_process.sh train
+python train.py -m tmp_train_file_aa
 ```
+
+```shell
+scripts/split_files_to_process.sh team_classification
+python team_prediction.py config/training.json --GPU 0 --num_loading_processes 15 -m tmp_team_classification_file_aa
+```
+
+### Joining the results
+
+
+
+match_path="/datasets/soccernet/germany_bundesliga/2015-2016/2015-09-26 - 16-30 1. FSV Mainz 05 0 - 3 Bayern Munich"
