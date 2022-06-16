@@ -1,5 +1,6 @@
 import shutil
 from argparse import ArgumentParser
+from math import ceil
 from pathlib import Path
 
 import matplotlib
@@ -13,6 +14,7 @@ from tqdm import tqdm
 from IO import load_bboxes
 from IO import load_sampling_aspect_ratios
 from regions import iou
+
 
 PERSON_ID = 0
 
@@ -30,10 +32,10 @@ def load_semantic_segmentation(match_path, half, min_segmentation_score):
 def load_groundtruth_bboxes(match_path, half, sar):
     half_match_detections = load_bboxes(match_path, half)
     num_frames = len(half_match_detections)
-    bboxes = [half_match_detections[idx].get('bboxes') for idx in range(num_frames)]
-    if sar > 1:
-        bboxes = [[int(sar * bb[0]), bb[1], int(sar * bb[2]), bb[3]] for bb in bboxes]
-    return bboxes
+    bboxes_in_frames = [half_match_detections[idx].get('bboxes') for idx in range(num_frames)]
+    if sar <= 1:
+        return bboxes_in_frames
+    return [[[int(sar * bb[0]), bb[1], int(sar * bb[2]), bb[3]] for bb in bboxes] for bboxes in bboxes_in_frames]
 
 
 def calc_mean_iou_scores(bboxes, semantic_seg):
@@ -63,28 +65,40 @@ def match_video(match_path, half, sar, min_segmentation_score):
     sampling_freq = int(2 * num_frames / num_detected_frames)
 
     match_indices, mean_iou_scores = [], []
-    start_idx, end_idx = 0, min(sampling_freq, num_frames)
-    for i in range(num_detected_frames):
-        if len(bboxes[i]) > 0:
-            for j in range(6):
-                mean_iou_score = [calc_mean_iou_scores(bboxes[i], semantic_seg[j]) for j in range(start_idx, end_idx)]
-                idx = np.argmax(mean_iou_score)
+    last_idx, start_idx, end_idx = 0, 0, min(sampling_freq, num_frames)
+    for i in tqdm(range(num_detected_frames), desc=f'{match_path} {half+1}', leave=True, position=0):
+        if len(bboxes[i]) != 0:
+            max_mean_iou_score, idx = -np.inf, -1
+            tested_indices = set()
 
-                if mean_iou_score[idx] < 0.5:
-                    start_idx -= sampling_freq // 2
-                    end_idx += sampling_freq // 2
+            n = 30
+            for j in range(n):
+                indices = sorted(set(np.arange(start_idx, end_idx)) - tested_indices)
+                if len(indices) == 0:
+                    break
+                mean_iou_scores_ = [calc_mean_iou_scores(bboxes[i], semantic_seg[j]) for j in indices]
+
+                max_id = np.argmax(mean_iou_scores_)
+                if mean_iou_scores_[max_id] > max_mean_iou_score:
+                    max_mean_iou_score = mean_iou_scores_[max_id]
+                    idx = indices[max_id]
+
+                if max_mean_iou_score < 0.5:
+                    start_idx = max(start_idx - sampling_freq//2, max(last_idx-sampling_freq, 0))
+                    end_idx = min(end_idx + sampling_freq//2, len(semantic_seg))
+                    tested_indices = tested_indices.union(set(indices))
                 else:
                     break
-            mean_iou_scores.append(mean_iou_score[idx])
 
-            idx += start_idx
+            mean_iou_scores.append(max_mean_iou_score)
             match_indices.append(idx)
-            start_idx = idx + 1
+
+            start_idx = idx + sampling_freq // 4
+            end_idx = min(idx + ceil(4 * sampling_freq / 5), len(semantic_seg))
         else:
             mean_iou_scores.append(3)
             match_indices.append(start_idx + sampling_freq // 2)
-
-        end_idx = min(start_idx + sampling_freq, num_frames)
+            end_idx = min(start_idx + 10 * sampling_freq, len(semantic_seg))
 
     return np.asarray(match_indices), np.asarray(mean_iou_scores)
 
@@ -99,8 +113,8 @@ if __name__ == '__main__':
                        help='Path for a file containing a matches list to process',
                        default=None, type=lambda p: Path(p))
     parser.add_argument('-half',
-                       help='Match half to process (default: None)',
-                       default=None, type=int)
+                        help='Match half to process (default: None)',
+                        default=None, type=int)
     parser.add_argument('-d', '--dataset_path', required=False,
                         help='Path for SoccerNet dataset (default: data/soccernet)',
                         default="data/soccernet", type=lambda p: Path(p))
@@ -121,7 +135,7 @@ if __name__ == '__main__':
     else:
         match_paths = [args.single_match]
 
-    if args.half:
+    if args.half is not None:
         halves = [args.half]
     else:
         halves = [0, 1]
@@ -131,6 +145,10 @@ if __name__ == '__main__':
         sar = sampling_aspect_ratios[match_path]
         for half in halves:
 
+            all_frames_dir = match_path.joinpath(f'{half + 1}_HQ', 'all_frames')
+            if not all_frames_dir.exists():
+                continue
+
             fixed_indices_fpath = match_path.joinpath(f'fixed_indices_results_{half + 1}.npz')
             if not fixed_indices_fpath.exists() or args.rematch:
                 match_indices, mean_iou_scores = match_video(match_path, half, sar, args.min_segmentation_score)
@@ -138,7 +156,7 @@ if __name__ == '__main__':
             else:
                 data = np.load(fixed_indices_fpath)
                 match_indices, mean_iou_scores = map(data.get, ['match_indices', 'mean_iou_scores'])
-
+            
             if not args.no_fix_files:
                 frames_dir = match_path.joinpath(f'{half + 1}_HQ', 'frames')
                 if frames_dir.exists():
@@ -171,7 +189,7 @@ if __name__ == '__main__':
             ax.set_xlim([0, len(match_indices)])
             plt.xlabel("Frame", fontsize=20)
             plt.ylabel("Consecutive frame index difference", fontsize=20)
-            plt.savefig(match_path.joinpath(f'indices_diff_{half+1}.jpg'))
+            plt.savefig(match_path.joinpath(f'indices_diff_{half + 1}.jpg'))
             plt.close(fig)
 
             fig, ax = plt.subplots(figsize=(15, 10))
@@ -179,5 +197,5 @@ if __name__ == '__main__':
             ax.set_xlim([0, len(match_indices)])
             plt.xlabel("Frame", fontsize=20)
             plt.ylabel("Mean IoU", fontsize=20)
-            plt.savefig(match_path.joinpath(f'mean_iou_scores_{half+1}.jpg'))
+            plt.savefig(match_path.joinpath(f'mean_iou_scores_{half + 1}.jpg'))
             plt.close(fig)

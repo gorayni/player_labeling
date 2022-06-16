@@ -1,7 +1,7 @@
 from collections import OrderedDict
 from itertools import combinations
+from itertools import product
 
-import cv2
 import numpy as np
 from nltk.cluster import KMeansClusterer
 from nltk.cluster import euclidean_distance
@@ -203,9 +203,8 @@ def filter_candidates(candidates, min_likelihood=0.99):
     return filtered_candidates
 
 
-def label_midfielders(midfielders_blobs, num_clusters=10, distance='euclidean', distances_thresholds=None,
-                      non_outlier_thres=100, num_components=10, criteria='median', min_likelihood=0.99,
-                      svc_probability_thres=0.99, gamma=0.1, kernel='rbf'):
+def label(midfielders_blobs, num_clusters, distance, distances_thresholds, non_outlier_thres, num_components, criteria,
+          min_likelihood, svc_probability_thres, gamma, kernel):
 
     hists = [blob.hist for half in range(2) for _, frame in midfielders_blobs[half].items() for blob in frame]
     hists = np.squeeze(np.asarray(hists, dtype=np.float32))
@@ -241,14 +240,75 @@ def label_midfielders(midfielders_blobs, num_clusters=10, distance='euclidean', 
     candidates = predict_candidates(midfielders_blobs, hists, class_samples, gamma, kernel, svc_probability_thres)
     candidates = filter_candidates(candidates, min_likelihood)
 
-    labels = dict()
+    labels = {0: {}, 1: {}}
     for category, samples in candidates.items():
         for half, frame_idx, blob in samples.locations:
-            if half not in labels:
-                labels[half] = {}
             if frame_idx not in labels[half]:
                 labels[half][frame_idx] = []
 
             blob.category = category
             labels[half][frame_idx].append(blob)
     return labels
+
+
+def get_hists_by_category(labels, category):
+    hists = [b.hist for half in range(2) for _, frame in labels[half].items() for b in frame if
+             b.category == category]
+    return np.squeeze(np.asarray(hists, dtype=np.float32))
+
+
+def match_dark_and_bright_categories(dark_labels, bright_labels):
+    dark_teams = [np.median(get_hists_by_category(dark_labels, t), axis=0) for t in range(1, 3)]
+    bright_teams = [np.median(get_hists_by_category(bright_labels, t), axis=0) for t in range(1, 3)]
+
+    min_distance, pair = 1, None
+    for i, j in product(range(2), range(2)):
+        dist = bhattacharyya_distance(dark_teams[i], bright_teams[j])
+        if dist < min_distance:
+            min_distance = dist
+            pair = (i, j)
+    match_categories = {0: 0, 1 + pair[0]: 1 + pair[1], 2 - pair[0]: 2 - pair[1]}
+
+    for half, blobs_by_frame_ids in dark_labels.items():
+        for frame_id, blobs in blobs_by_frame_ids.items():
+            for b in blobs:
+                b.category = match_categories[b.category]
+
+
+def label_midfielders(midfielders_blobs, calculate_dark_regions=False, num_clusters=10, distance='euclidean',
+                      distances_thresholds=None, non_outlier_thres=100, num_components=10, criteria='median',
+                      min_likelihood=0.99, svc_probability_thres=0.99, gamma=0.1, kernel='rbf'):
+    if calculate_dark_regions:
+        dark_blobs, bright_blobs = {0: {}, 1: {}}, {0: {}, 1: {}}
+        for half, blobs_by_frame_idx in midfielders_blobs.items():
+            for frame_idx, blobs in blobs_by_frame_idx.items():
+                for b in blobs:
+                    split = dark_blobs if b.is_dark else bright_blobs
+                    if frame_idx not in split[half]:
+                        split[half][frame_idx] = []
+                    split[half][frame_idx].append(b)
+
+        dark_labels = label(dark_blobs, num_clusters, distance, distances_thresholds, non_outlier_thres, num_components,
+                            criteria, min_likelihood, svc_probability_thres, gamma, kernel)
+        bright_labels = label(bright_blobs, num_clusters, distance, distances_thresholds, non_outlier_thres,
+                              num_components, criteria, min_likelihood, svc_probability_thres, gamma, kernel)
+       
+        match_dark_and_bright_categories(dark_labels, bright_labels)
+
+        frame_ids_by_half = {0: set(), 1: set()}
+        for half, blobs_by_frame_ids in dark_labels.items():
+            frame_ids_by_half[half].update(blobs_by_frame_ids.keys())
+        for half, blobs_by_frame_ids in bright_labels.items():
+            frame_ids_by_half[half].update(blobs_by_frame_ids.keys())
+
+        labels = {0: {}, 1: {}}
+        for half in range(2):
+            for frame_idx in frame_ids_by_half[half]:
+                labels[half][frame_idx] = []
+
+                labels[half][frame_idx].extend(dark_labels[half].get(frame_idx, []))
+                labels[half][frame_idx].extend(bright_labels[half].get(frame_idx, []))
+        return dark_labels
+    else:
+        return label(midfielders_blobs, num_clusters, distance, distances_thresholds, non_outlier_thres, num_components,
+                     criteria, min_likelihood, svc_probability_thres, gamma, kernel)

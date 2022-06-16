@@ -110,6 +110,9 @@ if __name__ == '__main__':
     parser.add_argument('--logs_dir', required=False,
                         help='Path for segmentation logging directory (default: segmentation_logs)',
                         default="segmentation_logs", type=lambda p: Path(p))
+    parser.add_argument('--all_frames', required=False,
+                        help="Extract and segment all frames from video (default: False)",
+                        action='store_true')
     parser.add_argument('--log_config', required=False,
                         help='Logging configuration file (default: config/log_config.yml)',
                         default="config/log_config.yml", type=lambda p: Path(p))
@@ -127,20 +130,25 @@ if __name__ == '__main__':
     else:
         videos = [args.single_video]
 
+    all_frames_prefix = 'all_' if args.all_frames else ''
     for video in tqdm(videos, desc='Overall Progress', leave=True, position=0):
         half = int(video.stem[0]) - 1
 
         match_path = video.parent
-        segmentation_results_fpath = match_path.joinpath(f'segmentation_results_{half + 1}_HQ.npy')
+        segmentation_results_fpath = match_path.joinpath(f'{all_frames_prefix}segmentation_results_{half + 1}_HQ.npy')
         if segmentation_results_fpath.exists():
+            print(video)
             continue
 
-        frames_dir = match_path.joinpath(f'{half + 1}_HQ', 'frames')
+        frames_dir = match_path.joinpath(f'{half + 1}_HQ', f'{all_frames_prefix}frames')
         if not frames_dir.exists():
             frames_dir.mkdir(parents=True, exist_ok=True)
 
             logging.info(f'Extracting frames into {frames_dir}')
-            subprocess.check_call(f'./scripts/extract_frames.sh "{str(video).strip()}" "{frames_dir}"', shell=True)
+            if args.all_frames:
+                subprocess.check_call(f'./scripts/extract_frames.sh -a "{str(video).strip()}" "{frames_dir}"', shell=True)
+            else:
+                subprocess.check_call(f'./scripts/extract_frames.sh "{str(video).strip()}" "{frames_dir}"', shell=True)
 
         num_frames = len(list(frames_dir.glob('*.jpg')))
         logging.info(f'Number of frames to segment {num_frames}')

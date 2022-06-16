@@ -9,6 +9,7 @@ from pathlib import Path
 import cv2 as cv
 import numpy as np
 from skimage import io
+from skimage.filters import gaussian
 from skimage.morphology import binary_erosion
 from skimage.morphology import disk
 from sklearn.mixture import GaussianMixture
@@ -24,13 +25,14 @@ from field_calibration import calculate_dist_from_goals
 from field_calibration import calculate_radar_position
 from field_calibration import load_homography
 from regions import area
+from regions import bhattacharyya_distance
 from regions import calculate_patch_hist
 from regions import get_masked_patch
 from regions import get_patch
 from regions import iou
-from regions import bhattacharyya_distance
 from regions import rgb2lab
 from regions import to_mask
+from util import FaissKMeans
 from util import load_log_configuration
 
 
@@ -89,22 +91,32 @@ def match_semantic_segmentation_bboxes(bboxes, semantic_seg, idx, min_segmentati
                 iou_scores[c, i] > 0.1]
 
 
-def calculate_masked_patch_hist(frame, mask_bb, mask_cnt, erosion_disk_radius=2, hist_type='rgb'):
+def calculate_masked_patch_hist(frame, mask_bb, mask_cnt, erosion_disk_radius=2, hist_type='rgb', part='all'):
     patch = get_patch(frame, mask_bb, False)
     mask = to_mask(mask_bb, mask_cnt)
+
     if erosion_disk_radius > 0:
         eroded_mask = np.zeros(mask.shape, dtype=np.uint8)
         binary_erosion(mask, disk(erosion_disk_radius), out=eroded_mask)
         mask = eroded_mask
+
+    if part == 'upper':
+        half_height = mask.shape[0] // 2
+        mask[half_height:, :] = 0
+    elif part == 'lower':
+        half_height = mask.shape[0] // 2
+        mask[:half_height, :] = 0
+
     return calculate_patch_hist(patch, mask, hist_type)
 
 
-def filter_bench_people(homography, bboxes, bench_dist):
-    return [bb for bb in bboxes if calculate_radar_position(bb, homography)[1] < bench_dist]
+def filter_touchline_people(homography, bboxes, near_touchline_dist, far_touchline_dist):
+    return [b for b in bboxes if far_touchline_dist < calculate_radar_position(b, homography)[1] < near_touchline_dist]
 
 
 def extract_midfielders_blobs(match_path, players_bboxes, sar, min_segmentation_score=0.65, min_dist_to_goals=20,
-                              min_player_bb_area=1000, erosion_disk_radius=2, hist_type='rgb', bench_dist=29):
+                              min_player_bb_area=1000, erosion_disk_radius=2, hist_type='rgb', near_touchline_dist=29,
+                              far_touchline_dist=0.5, calculate_dark_regions=False):
     players_blobs = {0: {}, 1: {}}
     for half in range(2):
         half_match_calibration = load_calibration(match_path, half)
@@ -121,8 +133,8 @@ def extract_midfielders_blobs(match_path, players_bboxes, sar, min_segmentation_
             if any(d < min_dist_to_goals for d in distances):
                 continue
 
-            if bench_dist:
-                bboxes = filter_bench_people(homography, bboxes, bench_dist)
+            if near_touchline_dist and far_touchline_dist:
+                bboxes = filter_touchline_people(homography, bboxes, near_touchline_dist, far_touchline_dist)
 
             if len(bboxes) == 0:
                 continue
@@ -133,8 +145,11 @@ def extract_midfielders_blobs(match_path, players_bboxes, sar, min_segmentation_
             frame_path = frames_dir.joinpath(f'{idx + 1:05}.jpg')
             f = io.imread(frame_path)
 
-            dark_regions_mask = calculate_dark_regions_mask(f)
-            dark_contours = cv.findContours(dark_regions_mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)[0]
+            if calculate_dark_regions:
+                dark_regions_mask = calculate_dark_regions_mask(f)
+                dark_contours = cv.findContours(dark_regions_mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)[0]
+            else:
+                dark_contours = []
 
             for bb, mask_bb, mask_cnt, _ in bboxes_masks:
                 if area(mask_bb) < min_player_bb_area:
@@ -146,13 +161,12 @@ def extract_midfielders_blobs(match_path, players_bboxes, sar, min_segmentation_
                     is_dark = in_dark_region(bb_centroid, dark_contours)
 
                 hist = calculate_masked_patch_hist(f, mask_bb, mask_cnt, erosion_disk_radius, hist_type)
-
                 players_blobs[half][idx].append(Blob(bb, mask_bb, mask_cnt, hist, is_dark))
     return players_blobs
 
 
-def filter_bboxes_by_size(midfielders_blobs):
-    bboxes = [blob.mask_bb for half in range(2) for _, frame in midfielders_blobs[half].items() for blob in frame]
+def filter_by_bboxes_size(blobs):
+    bboxes = [blob.mask_bb for half in range(2) for _, frame in blobs[half].items() for blob in frame]
 
     bb_sizes = np.asarray([[bb[2] - bb[0], bb[3] - bb[1]] for bb in bboxes])
     gmm = GaussianMixture(n_components=20, random_state=0).fit(bb_sizes)
@@ -162,7 +176,7 @@ def filter_bboxes_by_size(midfielders_blobs):
     scores /= scores.max()
 
     filtered_blobs, k = {}, 0
-    for half, players_blobs in midfielders_blobs.items():
+    for half, players_blobs in blobs.items():
         filtered_blobs[half] = {}
         for frame_idx, blobs in players_blobs.items():
             filtered_blobs[half][frame_idx] = []
@@ -173,9 +187,19 @@ def filter_bboxes_by_size(midfielders_blobs):
     return filtered_blobs
 
 
-def calculate_dark_regions_mask(img, brightness_threshold=100, opening_disk_radius=20, min_area_proportion=0.05):
-    mask = rgb2lab(img)[:, :, 0] < brightness_threshold
+def calculate_dark_regions_mask(img, opening_disk_radius=20, min_area_proportion=0.1, gpu_devices=None):
+    filtered_brightness = gaussian(rgb2lab(img)[:, :, 0], 3, multichannel=True, mode='reflect')
+    filtered_brightness = filtered_brightness.astype(np.float32)
+    if gpu_devices is None:
+        gpu_devices = [0]
+    kmeans = FaissKMeans(2, 100, gpu_devices)
+    kmeans.fit(filtered_brightness.reshape((-1, 1)))
+
+    mask = kmeans.predict(filtered_brightness.reshape((-1, 1)))
+    if np.argmin(kmeans.centroids) == 0:
+        mask = 1 - mask
     mask = 255 * mask.astype(np.uint8)
+    mask = mask.reshape(filtered_brightness.shape)
 
     # Removing small regions and connecting big ones
     disk = cv.getStructuringElement(cv.MORPH_ELLIPSE, (opening_disk_radius, opening_disk_radius))
@@ -188,16 +212,9 @@ def calculate_dark_regions_mask(img, brightness_threshold=100, opening_disk_radi
     contours = cv.findContours(opened_mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)[0]
     for cnt in contours:
         if cv.contourArea(cnt) >= min_field_area:
-            # cv.drawContours(filtered_mask, [cnt], 0, 255, -1)
-            hull = cv.convexHull(cnt)
-            cv.drawContours(filtered_mask, [hull], 0, 255, -1)
+            cv.drawContours(filtered_mask, [cnt], 0, 255, -1)
+
     return filtered_mask
-
-
-def fix_dark_regions(img, brightness_correction=60, brightness_threshold=100, opening_disk_radius=20, min_area_proportion=0.1):
-    mask = calculate_dark_regions_mask(img, brightness_threshold, opening_disk_radius, min_area_proportion)
-    mask = np.repeat(mask[:, :, np.newaxis]//255, 3, axis=2)
-    return cv.add(img, brightness_correction * mask)
 
 
 def in_dark_region(point, contours):
@@ -209,7 +226,7 @@ def in_dark_region(point, contours):
 
 def extract_goalkeeper(match_path, half, semantic_seg, sar, goal_center, category, players_bboxes, labels,
                        min_segmentation_score=0.65, min_goalkeeper_and_goal_dist=5, min_dist_to_goalkeeper=2.5,
-                       min_player_bb_area=1000, erosion_disk_radius=2, hist_type='rgb'):
+                       min_player_bb_area=1000, erosion_disk_radius=2, hist_type='rgb', calculate_dark_regions=False):
     half_match_calibration = load_calibration(match_path, half)
     frames_dir = match_path.joinpath(f'{half + 1}_HQ/frames')
 
@@ -241,13 +258,14 @@ def extract_goalkeeper(match_path, half, semantic_seg, sar, goal_center, categor
         frame_path = frames_dir.joinpath(f'{idx + 1:05}.jpg')
         f = io.imread(frame_path)
 
-        dark_regions_mask = calculate_dark_regions_mask(f)
-        dark_contours = cv.findContours(dark_regions_mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)[0]
-
         is_dark = False
-        if len(dark_contours) > 0:
-            bb_centroid = ((bb[2] + bb[0]) // 2, (bb[3] + bb[1]) // 2)
-            is_dark = in_dark_region(bb_centroid, dark_contours)
+        if calculate_dark_regions:
+            dark_regions_mask = calculate_dark_regions_mask(f)
+            dark_contours = cv.findContours(dark_regions_mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)[0]
+
+            if len(dark_contours) > 0:
+                bb_centroid = ((bb[2] + bb[0]) // 2, (bb[3] + bb[1]) // 2)
+                is_dark = in_dark_region(bb_centroid, dark_contours)
 
         hist = calculate_masked_patch_hist(f, mask_bb, mask_cnt, erosion_disk_radius, hist_type)
         labels[half][idx] = [Blob(bb, mask_bb, mask_cnt, hist, is_dark, category)]
@@ -336,8 +354,9 @@ def filter_class_instances(labels, color_hist_threshold=0.4):
 
 def extract_preliminary_labels(match_path, players_bboxes, sar, min_segmentation_score,
                                min_dist_to_goals, min_player_bb_area, erosion_disk_radius, hist_type,
-                               min_goalkeeper_and_goal_dist, min_dist_to_goalkeeper, color_hist_threshold, bench_dist,
-                               save=True):
+                               min_goalkeeper_and_goal_dist, min_dist_to_goalkeeper, color_hist_threshold,
+                               near_touchline_dist, far_touchline_dist, num_midfield_clusters,
+                               calculate_dark_regions, save=True):
     midfielders_blobs = extract_midfielders_blobs(match_path,
                                                   players_bboxes,
                                                   sar,
@@ -346,10 +365,11 @@ def extract_preliminary_labels(match_path, players_bboxes, sar, min_segmentation
                                                   min_player_bb_area,
                                                   erosion_disk_radius,
                                                   hist_type,
-                                                  bench_dist)
-    midfielders_blobs = filter_bboxes_by_size(midfielders_blobs)
-
-    midfielders = label_midfielders(midfielders_blobs)
+                                                  near_touchline_dist,
+                                                  far_touchline_dist,
+                                                  calculate_dark_regions)
+    midfielders_blobs = filter_by_bboxes_size(midfielders_blobs)
+    midfielders = label_midfielders(midfielders_blobs, calculate_dark_regions, num_midfield_clusters)
 
     goalkeepers = extract_goalkeepers(match_path,
                                       players_bboxes,
@@ -363,14 +383,14 @@ def extract_preliminary_labels(match_path, players_bboxes, sar, min_segmentation
 
     labels = {h: midfielders[h] | goalkeepers[h] for h in range(2)}
     filtered_labels = filter_class_instances(labels, color_hist_threshold)
-    
+
     goalkeepers_count = count_instances(filtered_labels, [3, 4])
     if goalkeepers_count[3] == 0 or goalkeepers_count[4] == 0:
         filtered_labels = remove_referees_from_goalkeepers(labels)
-        filtered_labels = filter_class_instances(filtered_labels, args.color_hist_threshold)
+        filtered_labels = filter_class_instances(filtered_labels, color_hist_threshold)
 
     labels = filtered_labels
-
+    
     if save:
         labels_path = match_path.joinpath('player_labeling', 'labels.pkl')
         with labels_path.open(mode='wb') as fid:
@@ -468,7 +488,10 @@ def main(args):
                                                 args.min_goalkeeper_and_goal_dist,
                                                 args.min_dist_to_goalkeeper,
                                                 args.color_hist_threshold,
-                                                args.bench_dist)
+                                                args.near_touchline_dist,
+                                                args.far_touchline_dist,
+                                                args.num_midfield_clusters,
+                                                args.calculate_dark_regions)
         else:
             logging.info(f'Labels.pkl exists for match {match_path}')
             with labels_path.open(mode='rb') as fid:
@@ -513,8 +536,8 @@ def parse_args():
                         help="Erosion disk radius for player's masks (default: 2)",
                         default=2, type=int)
     parser.add_argument('--hist_type', choices=['rgb', 'hsv', 'hs', 'lab', 'ab'],
-                        help='Histogram type for midfielders clustering  (default: rgb)',
-                        default='rgb', type=str)
+                        help='Histogram type for midfielders clustering  (default: ab)',
+                        default='ab', type=str)
     parser.add_argument('--min_goalkeeper_and_goal_dist',
                         help='Min distance between goalkeeper and goal [0-64] (default: 5)',
                         default=5, type=float)
@@ -530,8 +553,15 @@ def parse_args():
                         default=0.1, type=float)
     parser.add_argument('--seed', help='random seed (default: 42)',
                         default=42, type=int)
-    parser.add_argument('--bench_dist', help='Distance to the bench  (default: 29)',
-                        default=29, type=int)
+    parser.add_argument('--far_touchline_dist', help='Distance to the furthest touchline to the camera  (default: 29)',
+                        default=3, type=float)
+    parser.add_argument('--near_touchline_dist', help='Distance to the nearest touchline to the camera  (default: 29)',
+                        default=29, type=float)
+    parser.add_argument('--calculate_dark_regions', required=False,
+                        help="Calculate if blobs are in a dark region (default: False)",
+                        action='store_true')
+    parser.add_argument('--num_midfield_clusters', help='Number of midfield clusters  (default: 10)',
+                        default=10, type=int)
     parser.add_argument('--logs_dir', required=False,
                         help='Path for logging directory (default: velocity_logs)',
                         default="velocity_logs", type=lambda p: Path(p))

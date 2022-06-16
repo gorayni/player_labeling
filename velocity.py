@@ -224,13 +224,22 @@ def get_segmented_people(semantic_seg):
 
 def velocity_vectors_from_half_match(match_path, half, num_rgb_frames, num_optical_flow_frames, fixed_regions_args,
                                      field_segmentation_args, gpu_devices=None):
-
     segmentation_results_fpath = match_path.joinpath(f'segmentation_results_{half + 1}_HQ.npy')
     semantic_seg = np.load(segmentation_results_fpath, allow_pickle=True)
 
-    optical_flow_indices = np.ceil(np.linspace(num_optical_flow_frames / num_rgb_frames,
-                                               num_optical_flow_frames,
-                                               num=num_rgb_frames)).astype(int) - 1
+    fixed_indices_fpath = match_path.joinpath(f'fixed_indices_results_{half + 1}.npz')
+
+    if fixed_indices_fpath.exists():
+        match_indices = np.load(fixed_indices_fpath)['match_indices']
+
+        all_segmentation_results_fpath = match_path.joinpath(f'all_segmentation_results_{half + 1}_HQ.npy')
+        num_all_frames = len(np.load(all_segmentation_results_fpath, allow_pickle=True))
+
+        optical_flow_indices = [int(i * (num_optical_flow_frames - 1) / (num_all_frames - 1)) for i in match_indices]
+    else:
+        optical_flow_indices = np.ceil(np.linspace(num_optical_flow_frames / num_rgb_frames,
+                                                   num_optical_flow_frames,
+                                                   num=num_rgb_frames)).astype(int) - 1
 
     half_match_path = match_path.joinpath(f'{half + 1}_HQ')
     frames_path = half_match_path.joinpath('frames')

@@ -140,6 +140,6 @@ python team_prediction.py config/training.json --GPU 0 --num_loading_processes 1
 
 ### Joining the results
 
-
-
-match_path="/datasets/soccernet/germany_bundesliga/2015-2016/2015-09-26 - 16-30 1. FSV Mainz 05 0 - 3 Bayern Munich"
+```shell
+python join_results.py -m matches_to_process
+```
