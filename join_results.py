@@ -89,8 +89,8 @@ if __name__ == '__main__':
         joined_results_fpath = match_path.joinpath(f'player_velocity_team_results.npy')
         if joined_results_fpath.exists():
             continue
-        try:        
-            results = join_results(match_path)
-            np.save(joined_results_fpath, results)
-        except Exception as e:
-            logging.info(f'An exception occurred for match {match_path}: {e}')
+        # try:
+        results = join_results(match_path)
+        np.save(joined_results_fpath, results)
+        # except Exception as e:
+        #     logging.info(f'An exception occurred for match {match_path}: {e}')

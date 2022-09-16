@@ -190,7 +190,7 @@ def parse_args():
                        help='Path for a file containing a matches list to process',
                        default=None, type=lambda p: Path(p))
     parser.add_argument('-c', '--conf', required=False,
-                        help='JSON configuration filepath (default: config/velocity.json)',
+                        help='JSON configuration filepath (default: config/training.json)',
                         default="config/training.json", type=lambda p: Path(p))
     parser.add_argument('--max_num_workers', required=False,
                         help='number of worker to load data (default: 2)',

@@ -78,8 +78,8 @@ match_path="/datasets/soccernet/europe_uefa-champions-league/2014-2015/2014-11-0
 ### Semantic Segmentation
 
 ```shell
-python segmentation.py -s "$match_path"/1_HQ.mkv
-python segmentation.py -s "$match_path"/2_HQ.mkv
+python segment_video.py -s "$match_path"/1_HQ.mkv
+python segment_video.py -s "$match_path"/2_HQ.mkv
 ```
 
 ### Player velocity from optical flow
@@ -111,7 +111,7 @@ All the tasks can be processed in parallel. The number of parallel processes for
 
 ```shell
 scripts/split_files_to_process.sh segmentation
-python segmentation.py -v tmp_segmentation_file_aa
+python segment_video.py -v tmp_segmentation_file_aa
 ```
 
 ### Player velocity from optical flow
