@@ -68,7 +68,7 @@ if __name__ == '__main__':
 
     if args.matches:
         with args.matches.open() as f:
-            matches = [Path(line) for line in f.readlines()]
+            matches = [Path(line) for line in f.read().splitlines()]
     else:
         matches = [args.single_match]
 
