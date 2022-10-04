@@ -55,13 +55,20 @@ conda activate player_labeling
 
 3. Change the SoccerNetV2 directory path in `scripts/soccernet_conf.sh` file
 
-4. Calculate the number of optical flow frames previously obtained by running the command:
+4. Download the PointRend segmentation weights.
+
+```shell
+mkdir -p weights
+wget https://github.com/ayoolaolafenwa/PixelLib/releases/download/0.2.0/pointrend_resnet50.pkl -P weights
+```
+
+5. Calculate the number of optical flow frames previously obtained by running the command:
 
 ```shell
 ./scripts/calculate_optical_flow_num_frames.sh
 ```
 
-5. Calculate the sampling aspect ratio of the videos by running the command:
+6. Calculate the sampling aspect ratio of the videos by running the command:
 
 ```shell
 ./scripts/calculate_sampling_aspect_ratios.sh
