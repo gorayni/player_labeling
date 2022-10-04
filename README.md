@@ -1,5 +1,7 @@
 # Player Description Creation
 
+![Overview](assets/overview.png)
+
 This repository contains the code for automatically labeling player's team and his optical flow vector direction.
 
 The repository includes:
@@ -20,15 +22,15 @@ The code is documented and designed to be easy to extend. If you use it in your 
 
 If you use this code, please cite the following paper:
 
-Alejandro Cartas, Adrià Arbués-Sangüesa, Gloria Haro, and Coloma Ballester. "Towards Video Summarization: A Temporal Multimodal Method for Action Spotting in Sports Videos" EgoVIP Workshop at IROS (2021).
+Alejandro Cartas, Coloma Ballester, and Gloria Haro. "A Graph-Based Method for Soccer Action Spotting Using Unsupervised Player Classification" ACM MMSports Workshop (2022).
 
 ```
-@Misc{cartas2021activitySpotting,
-  author       = {Alejandro Cartas, Adrià Arbués-Sangüesa, Gloria Haro, and Coloma Ballester},
-  title        = {Towards Video Summarization: A Temporal Multimodal Method for Action Spotting in Sports Videos},
-  howpublished = {EgoVIP Workshop at International Conference on Intelligent Robots and Systems (IROS 2021)},
+@inproceedings{cartas2022GraphActionSpotting,
+  author       = {Alejandro Cartas, Coloma Ballester, and Gloria Haro},
+  title        = {A Graph-Based Method for Soccer Action Spotting Using Unsupervised Player Classification},
+  howpublished = {ACM Workshop on Multimedia Content Analysis in Sports (MMSports '22)},
   month        = Octuber,
-  year         = {2021},
+  year         = {2022},
 }
 ```
 
