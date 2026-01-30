@@ -16,7 +16,7 @@ from util import load_log_configuration
 
 
 def segment_directory(point_rend, frames_dir, batch_size):
-    image_paths = [f for f in frames_dir.glob('*.png')]
+    image_paths = sorted([f for f in frames_dir.glob('*.png')])
     num_frames = len(image_paths)
 
     im = Image.open(image_paths[0])
