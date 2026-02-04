@@ -18,27 +18,16 @@ The repository includes:
 
 The code is documented and designed to be easy to extend. If you use it in your research, please consider citing this repository (bibtex below).
 
-## Citation
 
-If you use this code, please cite the following paper:
-
-Alejandro Cartas, Coloma Ballester, and Gloria Haro. "A Graph-Based Method for Soccer Action Spotting Using Unsupervised Player Classification" ACM MMSports Workshop (2022).
-
-```
-@inproceedings{cartas2022GraphActionSpotting,
-  author       = {Alejandro Cartas, Coloma Ballester, and Gloria Haro},
-  title        = {A Graph-Based Method for Soccer Action Spotting Using Unsupervised Player Classification},
-  howpublished = {ACM Workshop on Multimedia Content Analysis in Sports (MMSports '22)},
-  month        = Octuber,
-  year         = {2022},
-}
-```
-
-## Requirements
+## ⚽ Requirements
 Python 3.9, PyTorch 1.10.0, and other common packages listed in `environment.yml`. (A Conda environment can be created from it following the instructions below.)
 
-# Setup
+To train or test on SoccerNet V2, you'll also need:
+* [SoccerNet Dataset](https://soccer-net.org/)
 
+## ⚽ Setup
+
+### Installation
 1. Clone this repository:
 
 ```shell
@@ -53,26 +42,30 @@ conda env create --name player_labeling --file environment.yml
 conda activate player_labeling
 ```
 
-3. Change the SoccerNetV2 directory path in `scripts/soccernet_conf.sh` file
-
-4. Download the PointRend segmentation weights.
+3. Download the PointRend segmentation weights.
 
 ```shell
 mkdir -p weights
 wget https://github.com/ayoolaolafenwa/PixelLib/releases/download/0.2.0/pointrend_resnet50.pkl -P weights
 ```
 
-5. Calculate the number of optical flow frames previously obtained by running the command:
+### SoccerNetV2 Preprocessing
+
+1. Change the SoccerNetV2 directory path in `scripts/soccernet_conf.sh` file
+
+2. Calculate the number of optical flow frames previously obtained by running the command:
 
 ```shell
 ./scripts/calculate_optical_flow_num_frames.sh
 ```
 
-6. Calculate the sampling aspect ratio of the videos by running the command:
+3. Calculate the sampling aspect ratio of the videos by running the command:
 
 ```shell
 ./scripts/calculate_sampling_aspect_ratios.sh
 ```
+
+## ⚽ Training/Testing
 
 # Single Soccer Match
 
@@ -151,4 +144,20 @@ python team_prediction.py config/training.json --GPU 0 --num_loading_processes 1
 
 ```shell
 python join_results.py -m matches_to_process
+```
+
+## ⚽ Citation
+
+If you use this code, please cite the following paper:
+
+Alejandro Cartas, Coloma Ballester, and Gloria Haro. "A Graph-Based Method for Soccer Action Spotting Using Unsupervised Player Classification" ACM MMSports Workshop (2022).
+
+```
+@inproceedings{cartas2022GraphActionSpotting,
+  author       = {Alejandro Cartas, Coloma Ballester, and Gloria Haro},
+  title        = {A Graph-Based Method for Soccer Action Spotting Using Unsupervised Player Classification},
+  howpublished = {ACM Workshop on Multimedia Content Analysis in Sports (MMSports '22)},
+  month        = Octuber,
+  year         = {2022},
+}
 ```

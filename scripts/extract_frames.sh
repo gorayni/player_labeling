@@ -52,23 +52,13 @@ if test -z "$all_frames"; then
   filtergraph="$filtergraph",fps=fps=2.:round=down
 fi
 
-if [ $iext == "png" ]; then
-  ffmpeg -hide_banner \
-         -loglevel error \
-         -ss "$start_time" \
-         -t "$duration_time" \
-         -i "$1" \
-         -vf "$filtergraph" \
-         -vsync 1 \
-         "$frames_dir"/%05d."$iext"
-else
-  ffmpeg -hide_banner \
-         -loglevel error \
-         -ss "$start_time" \
-         -t "$duration_time" \
-         -i "$1" \
-         -vf "$filtergraph" \
-         -vsync 1 \
-         -q:v 1 \
-         "$frames_dir"/%05d."$iext"
-fi
+[[ "$iext" == "jpg" ]] && quality_arg="-q:v 1" || quality_arg=""
+
+ffmpeg -hide_banner \
+       -loglevel error \
+       -ss "$start_time" \
+       -t "$duration_time" \
+       -i "$1" \
+       -vf "$filtergraph" \
+       -vsync 1 $quality_arg \
+       "$frames_dir"/%05d."$iext"
