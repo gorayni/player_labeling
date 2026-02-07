@@ -63,8 +63,8 @@ def load_log_configuration(log_config: Path, logs_dir: Path):
     logging.config.dictConfig(log_config)
 
 
-def images_size(frames_dir):
-    im = Image.open(frames_dir.joinpath(f'{1:05}.jpg'))
+def images_size(frame_path):
+    im = Image.open(frame_path)
     width, height = im.size
     return height, width
 

@@ -1,6 +1,9 @@
 import numpy as np
 import torch
 from imantics import Polygons
+from util import images_size
+from tqdm import tqdm
+from skimage.io import imread
 
 
 def preprocess_batch(point_rend, frames, height, width):
@@ -13,7 +16,7 @@ def preprocess_batch(point_rend, frames, height, width):
 
 
 def cut_masks(bboxes, masks, copy=False):
-    masks_ = list()
+    masks_ = []
     for i in range(len(bboxes)):
         x1, y1, x2, y2 = bboxes[i]
         if copy:
@@ -32,7 +35,7 @@ def to_polygons(masks):
 def segment(point_rend, inputs, polygonal_masks=True):
     predictions = point_rend.predictor.model(inputs)
 
-    outputs = list()
+    outputs = []
     for p in predictions:
         masks = p["instances"].pred_masks
         scores = p["instances"].scores
@@ -61,3 +64,23 @@ def segment(point_rend, inputs, polygonal_masks=True):
                         "scores": scores,
                         "masks": masks})
     return outputs
+
+
+def segment_directory(point_rend, frame_paths, batch_size, num_frames=None):
+    if num_frames is None:
+        frames_dir = frame_paths.path
+        num_frames = len(list(frames_dir.glob('*'+ frame_paths.suffix)))
+
+    height, width = images_size(frame_paths[0])
+
+    results = []
+    for i in tqdm(range(0, num_frames, batch_size)):
+        frames = [imread(frame_paths[j]) for j in range(i, min(i + batch_size, num_frames))]
+        with torch.no_grad():
+            inputs = preprocess_batch(point_rend, frames, height, width)
+            predictions = segment(point_rend, inputs)
+            torch.cuda.empty_cache()
+
+            results.extend(predictions)
+            del inputs
+    return results
