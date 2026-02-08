@@ -6,6 +6,7 @@ import colour
 import numpy as np
 from addict import Dict
 from skimage.draw import polygon
+from kitman.regions import iou
 
 rgb2hsv = partial(cv2.cvtColor, code=cv2.COLOR_RGB2HSV)
 rgb2lab = partial(cv2.cvtColor, code=cv2.COLOR_RGB2LAB)
@@ -43,24 +44,6 @@ def rgb2oklab(rgb):
     oklab[:, :, 2] = oklab[:, :, 1] * 127 + 127
     oklab = np.clip(oklab, 0, 255).astype(np.uint8)
     return oklab
-
-
-def area(bbox):
-    return (bbox[2] - bbox[0] + 1) * (bbox[3] - bbox[1] + 1)
-
-
-def iou(boxA, boxB):
-    xA = max(boxA[0], boxB[0])
-    yA = max(boxA[1], boxB[1])
-    xB = min(boxA[2], boxB[2])
-    yB = min(boxA[3], boxB[3])
-
-    interArea = max(0, xB - xA + 1) * max(0, yB - yA + 1)
-
-    boxAArea = area(boxA)
-    boxBArea = area(boxB)
-
-    return interArea / float(boxAArea + boxBArea - interArea)
 
 
 def match_by_iou(bboxes):
@@ -108,28 +91,6 @@ def calculate_hist(img, mask=None, hist_type='rgb'):
         hist /= hist.sum()
         return hist.astype(np.float32)
     return None
-
-
-def to_mask(bb, contours):
-    width, height = bb[2:] - bb[:2]
-    mask = np.zeros((height, width), dtype=np.uint8)
-    for cnt in contours:
-        rr, cc = polygon(cnt[:, 1], cnt[:, 0])
-
-        # FIXME: Polygon function sometimes exceeds the patch shape
-        indices = (rr < height) & (cc < width)
-        if len(indices) < len(rr):
-            warnings.warn(f'Generated polygon exceeds patch shape')
-        rr, cc = rr[indices], cc[indices]
-
-        mask[rr, cc] = 255
-    return mask
-
-
-def get_masked_patch(frame, bbox, mask_contour):
-    patch = get_patch(frame, bbox, copy=False)
-    mask = to_mask(bbox, mask_contour)
-    return cv2.bitwise_and(patch, patch, mask=mask)
 
 
 def calculate_patch_hist(patch, mask=None, hist_type='rgb'):

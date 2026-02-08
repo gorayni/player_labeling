@@ -21,7 +21,7 @@ from torchvision import transforms
 from tqdm import tqdm
 
 from IO import load_bboxes
-from regions import get_masked_patch
+from kitman.regions import get_masked_patch
 
 
 def get_segmented_people(semantic_seg):

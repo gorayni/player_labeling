@@ -24,13 +24,13 @@ from field_calibration import GOAL_CENTERS
 from field_calibration import calculate_dist_from_goals
 from field_calibration import calculate_radar_position
 from field_calibration import load_homography
-from regions import area
+from kitman.regions import area
 from regions import bhattacharyya_distance
 from regions import calculate_patch_hist
-from regions import get_masked_patch
-from regions import iou
+from kitman.regions import get_masked_patch
+from kitman.regions import iou
 from regions import rgb2lab
-from regions import to_mask
+from kitman.regions import to_mask
 from util import FaissKMeans
 from util import load_log_configuration
 from kitman.regions import get_patch

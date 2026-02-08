@@ -7,8 +7,8 @@ from tqdm import tqdm
 from IO import load_bboxes
 from IO import load_calibration
 from IO import load_sampling_aspect_ratios
-from regions import area
-from regions import iou
+from kitman.regions import area
+from kitman.regions import iou
 
 
 def parse_args():

@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 from IO import load_bboxes
 from IO import load_sampling_aspect_ratios
-from regions import iou
+from kitman.regions import iou
 
 
 PERSON_ID = 0
