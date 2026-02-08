@@ -110,15 +110,6 @@ def calculate_hist(img, mask=None, hist_type='rgb'):
     return None
 
 
-def get_patch(frame, bbox, copy=True):
-    x1, y1, x2, y2 = bbox
-    if len(frame.shape) == 3:
-        patch = frame[y1:y2, x1:x2, :]
-    else:
-        patch = frame[y1:y2, x1:x2]
-    return np.copy(patch) if copy else patch
-
-
 def to_mask(bb, contours):
     width, height = bb[2:] - bb[:2]
     mask = np.zeros((height, width), dtype=np.uint8)
@@ -133,27 +124,6 @@ def to_mask(bb, contours):
 
         mask[rr, cc] = 255
     return mask
-
-
-def draw_mask(frame, bb, contours, color=None):
-    x1, y1, x2, y2 = bb
-
-    if color is None:
-        color = 255
-
-    patch = frame[y1:y2, x1:x2, ...]
-    for cnt in contours:
-        rr, cc = polygon(cnt[:, 1], cnt[:, 0])
-
-        # FIXME: Polygon function sometimes exceeds the patch shape
-        original_rr_size = len(rr)
-        rr = np.minimum(rr, patch.shape[0] - 1)
-        cc = np.minimum(cc, patch.shape[1] - 1)
-
-        if len(rr) < original_rr_size:
-            warnings.warn(f'Generated polygon exceeds patch shape')
-
-        patch[rr, cc, ...] = color
 
 
 def get_masked_patch(frame, bbox, mask_contour):

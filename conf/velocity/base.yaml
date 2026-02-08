@@ -1,0 +1,11 @@
+fixed_regions:
+  num_clusters: 4
+  num_sampling_frames: 540
+
+field_segmentation:
+  clustering:
+    max_iter: 30
+    num_clusters: 5    
+  fixed_region_min_similarity: 0.011
+  min_area_proportion: 0.15
+  opening_disk_radius: 8

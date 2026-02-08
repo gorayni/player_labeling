@@ -28,12 +28,12 @@ from regions import area
 from regions import bhattacharyya_distance
 from regions import calculate_patch_hist
 from regions import get_masked_patch
-from regions import get_patch
 from regions import iou
 from regions import rgb2lab
 from regions import to_mask
 from util import FaissKMeans
 from util import load_log_configuration
+from kitman.regions import get_patch
 
 
 class Blob:

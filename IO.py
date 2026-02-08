@@ -3,7 +3,7 @@ import json
 import uuid
 from enum import Enum, unique
 from pathlib import Path
-
+from typing import Dict, List, Union
 from functools import reduce
 from operator import truediv
 
@@ -11,7 +11,7 @@ from operator import truediv
 import numpy as np
 from skimage import io
 
-from regions import get_patch
+from kitman.regions import get_patch
 
 
 @unique
@@ -23,16 +23,14 @@ class Players(Enum):
     GOALKEEPER_2 = 4
 
 
-def load_jsons(full_match_path, half, predictions):
-    json_fname = predictions.format(half + 1)
-    json_path = full_match_path.joinpath(json_fname)
-
+def load_jsons(full_match_path: Path, half: int, predictions_fname: str):
+    json_path = full_match_path / predictions_fname.format(half + 1)
     with json_path.open() as json_file:
         data = json.load(json_file)
         return data['predictions']
 
 
-def load_bboxes(full_match_path, half):
+def load_bboxes(full_match_path: Path, half: int):
     return load_jsons(full_match_path, half, '{}_player_boundingbox_maskrcnn.json')
 
 
@@ -40,13 +38,19 @@ def load_calibration(full_match_path, half):
     return load_jsons(full_match_path, half, '{}_field_calib_ccbv.json')
 
 
-def load_num_optical_flow_frames(dataset_path: Path):
-    num_optical_flow_frames_filepath = dataset_path.joinpath('num_optical_flow_frames.csv')
-    with num_optical_flow_frames_filepath.open(mode='r') as csv_file:
+def load_num_optical_flow_frames(dataset_path: Union[Path | str]) -> Dict[Path, List[int]]:
+    dataset_path = Path(dataset_path)
+    num_optical_flow_frames_filepath = dataset_path / "num_optical_flow_frames.csv"
+    with num_optical_flow_frames_filepath.open(mode="r") as csv_file:
         csv_reader = csv.DictReader(csv_file)
-        num_optical_flow_frames = {dataset_path.joinpath(r["match_path"]): [int(r["num_frames_first_half"]),
-                                                                            int(r["num_frames_second_half"])] for r
-                                   in csv_reader}
+        num_optical_flow_frames = {
+            dataset_path
+            / r["match_path"]: [
+                int(r["num_frames_first_half"]),
+                int(r["num_frames_second_half"]),
+            ]
+            for r in csv_reader
+        }
     return num_optical_flow_frames
 
 

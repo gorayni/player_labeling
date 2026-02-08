@@ -22,8 +22,13 @@ from tqdm import tqdm
 
 from IO import load_bboxes
 from regions import get_masked_patch
-from velocity import get_segmented_people
 
+
+def get_segmented_people(semantic_seg):
+    return [(bb, mask_cnts) for bb, mask_cnts, class_id in zip(semantic_seg['boxes'],
+                                                               semantic_seg['masks'],
+                                                               semantic_seg['class_ids'])
+            if class_id == 0]  # Person class ID is 0
 
 class MaskedPatch():
     def __init__(self, path, masked_patch):

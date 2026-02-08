@@ -1,0 +1,13 @@
+defaults:
+  - segmentation: base
+
+logging:
+  config: "conf/logging/log_config.yml"
+  dir: "segmentation_logs"
+
+# Mutually exclusive logic: set one, leave the other null
+single_video: null
+videos: null
+
+# Extract and segment all frames from video
+all_frames: false

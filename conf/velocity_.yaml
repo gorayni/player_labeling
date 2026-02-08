@@ -1,0 +1,15 @@
+defaults:
+  - velocity: base
+  - _self_
+
+logs:
+  config: "conf/logging/log_config.yml"
+  dir: "velocity_logs"
+
+
+# Mutually exclusive logic: set one, leave the other null
+single_match: null
+matches: null
+
+dataset_path: "data/soccernet"
+gpu_devices: []
