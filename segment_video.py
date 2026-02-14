@@ -38,30 +38,35 @@ def main(cfg: DictConfig):
         half = int(video.stem[0]) - 1
 
         match = Match(video.parent)
+        if cfg.all_frames:
+            segmentations_path = match.paths.all_segmentations[half]
+            frames = match.paths.all_frames[half]
+        else:
+            segmentations_path = match.paths.segmentations[half]
+            frames = match.paths.frames[half]
 
-        if match.paths.segmentations[half].exists:
+        if segmentations_path.exists():
             print(video)
             continue
 
-        frames_dir = match.paths.frames[half].path
-        if not frames_dir.exists():
-            frames_dir.mkdir(parents=True, exist_ok=True)
+        if not frames.path.exists():
+            frames.path.mkdir(parents=True, exist_ok=True)
 
-            logging.info(f"Extracting frames into {frames_dir}")
+            logging.info(f"Extracting frames into {frames.path}")
 
             if cfg.all_frames:
                 subprocess.check_call(
-                    f'./scripts/extract_frames.sh -a "{str(video)}" "{frames_dir}"',
+                    f'./scripts/extract_frames.sh -a "{str(video)}" "{frames.path}"',
                     shell=True,
                 )
             else:
                 subprocess.check_call(
-                    f'./scripts/extract_frames.sh "{str(video)}" "{frames_dir}"',
+                    f'./scripts/extract_frames.sh "{str(video)}" "{frames.path}"',
                     shell=True,
                 )
 
         start = time.time()
-        semantic_seg = segment_directory(point_rend, match.paths.frames[half], cfg.segmentation.batch_size)
+        semantic_seg = segment_directory(point_rend, frames, cfg.segmentation.batch_size)
         np.save(match.paths.segmentations[half], semantic_seg)
         logging.info(f"Video processing time is {time.time() - start} seconds")
     

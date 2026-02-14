@@ -31,6 +31,7 @@ class MatchPaths(DirPathsBuilder):
                 "groundtruth": "groundtruth.npy",  # NEEDED, seems it was created somehow
                 "sampling_aspect_ratio": "sampling_aspect_ratio.txt",  # NEEDED, seems it was created somehow
                 ################
+                "all_frames": [["{}_HQ", "all_frames"], "{:05d}.jpg"], # All RGB frames for each half
                 "all_segmentations": "all_segmentation_results_{}_HQ.npy",  # PointRend segmentation results for all frames
                 "fixed_indices_results": "fixed_indices_results_{}.npz",  # Created for Matches to correspond RGB frames to optical flow frames
                 "maskrcnn_bboxes": "{}_player_boundingbox_maskrcnn.json",  # Original Mask R-CNN bounding boxes
