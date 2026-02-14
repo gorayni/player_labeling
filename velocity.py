@@ -25,7 +25,7 @@ from optical_flow import resize_to_flow_shape_and_remove_borders
 from regions import cnts_to_indices
 from regions import scale_mask
 from segmentation import to_polygons
-from util import images_size
+from util import Shape, images_size
 from util import FaissKMeans
 from util import load_log_configuration
 
@@ -33,50 +33,14 @@ import hydra
 from omegaconf import DictConfig
 from kitman.regions import get_patch
 from kitman.visualizations import draw_mask
-from kitman.data import DirPathsBuilder, NonZeroBasedIndex
-from kitman.snv2 import load_groundtruth_bboxes
+
 from kitman.segmentation import SegmentedPlayer, POINTREND_PERSON_ID
 
+from typing import List
+from skimage.measure._regionprops import RegionProperties
 
-class MatchPaths(DirPathsBuilder):
-    def __init__(self, match_path):
-        match_path = Path(match_path)
-        super().__init__(
-            match_path,
-            {
-                "calibrations": "{}_field_calib_ccbv.json",
-                "clustered_segmentations": "clustering_{}_{}.npy",
-                "clustered_means": "cluster_means_{}.npy",
-                "clustered_segmentations_bkg": "clustering_bkg_{}_{}.npy",
-                "clustered_bkg_means": "cluster_bkg_means_{}.npy",
-                "frames": [["{}_HQ", "frames"], "{:05d}.jpg"],
-                "groundtruth": "groundtruth.npy",  # NEEDED, seems it was created somehow
-                "sampling_aspect_ratio": "sampling_aspect_ratio.txt",  # NEEDED, seems it was created somehow
-                ################
-                "all_segmentations": "all_segmentation_results_{}_HQ.npy",  # PointRend segmentation results for all frames
-                "fixed_indices_results": "fixed_indices_results_{}.npz",  # Created for Matches to correspond RGB frames to optical flow frames
-                "maskrcnn_bboxes": "{}_player_boundingbox_maskrcnn.json",  # Original Mask R-CNN bounding boxes
-                "segmentations": "segmentation_results_{}_HQ.npy",  # PointRend segmentation results
-                "velocity_results": "velocity_results.npy",
-                "u": [["{}_HQ", "u"], "{:06d}.jpg"],  # Optical flow U component frames
-                "v": [["{}_HQ", "v"], "{:06d}.jpg"],  # Optical flow V component frames
-            },
-            NonZeroBasedIndex(),
-        )
-        self.match = match_path
-        self.frames_extension = "jpg"
+from IO import Match
 
-
-class Match:
-    def __init__(self, match_path):
-        self.paths = MatchPaths(match_path)
-        self.num_rgb_frames = [None, None]
-        self.num_optical_flow_frames = [None, None]
-
-    def optical_flow(self, half: int, idx: int):
-        u = io.imread(self.paths.u[half, idx]).astype(np.float32)
-        v = io.imread(self.paths.v[half, idx]).astype(np.float32)
-        return (np.stack((u, v), axis=2) - 128) / 127.999
 
 
 def calculate_fixed_regions_mask(
@@ -85,8 +49,8 @@ def calculate_fixed_regions_mask(
     optical_flow_indices: List[int] | np.ndarray,
     gpu_devices: List[int],
     cfg: DictConfig,
-):
-    def load_abs_flow(idx):
+) -> np.ndarray:
+    def load_abs_flow(idx: int) -> np.ndarray:
         optical_flow = match.optical_flow(half, optical_flow_indices[idx])
         return np.abs(optical_flow) / cfg.num_sampling_frames
 
@@ -124,7 +88,7 @@ def segment_fixed_regions(
     optical_flow_indices: List[int] | np.ndarray,
     flow_sizes: np.ndarray,
     cfg: DictConfig,
-):
+) -> List[RegionProperties]:
 
     mask = calculate_fixed_regions_mask(
         match, half, optical_flow_indices, cfg.gpu_devices, cfg.velocity.fixed_regions
@@ -132,7 +96,11 @@ def segment_fixed_regions(
 
     mask = add_missing_borders(mask, flow_sizes)
     sampling_indices = np.ceil(
-        np.linspace(0, match.num_rgb_frames[half] - 1, num=cfg.velocity.fixed_regions.num_sampling_frames)
+        np.linspace(
+            0,
+            match.num_rgb_frames[half] - 1,
+            num=cfg.velocity.fixed_regions.num_sampling_frames,
+        )
     ).astype(int)
 
     idx = sampling_indices[0]
@@ -150,20 +118,24 @@ def segment_fixed_regions(
 
         for i, r in enumerate(regions):
             y1, x1, y2, x2 = r.bbox
-            patches[i] += get_patch(rgb, (x1, y1, x2, y2), False) / len(
-                sampling_indices
-            )
+            bbox = (x1, y1, x2, y2)
+            patches[i] += get_patch(rgb, bbox, False) / len(sampling_indices)
 
     for i, r in enumerate(regions):
         r.mask = img_as_ubyte(r.image)
         patches[i] = cv2.bitwise_and(patches[i], patches[i], mask=r.mask)
         patches[i][patches[i] > 255] = 255
         r.patch = img_as_ubyte(patches[i] / 255)
-
     return regions
 
 
-def field_segmentation(frame, segmented_people, fixed_regions, gpu_devices, cfg):
+def field_segmentation(
+    frame: np.ndarray,
+    segmented_people: List[SegmentedPlayer],
+    fixed_regions: List[RegionProperties],
+    gpu_devices: List[int],
+    cfg: DictConfig,
+) -> np.ndarray:
     # Removing fixed regions from frame if found
     for r in fixed_regions:
         y1, x1, y2, x2 = r.bbox
@@ -175,7 +147,7 @@ def field_segmentation(frame, segmented_people, fixed_regions, gpu_devices, cfg)
             continue
         patch[r.image, :] = 0
 
-    black = np.asarray([0., 0., 0.])
+    black = np.asarray([0.0, 0.0, 0.0])
     for person in segmented_people:
         draw_mask(frame, person.bb, person.mask_cnts, black)
 
@@ -185,13 +157,19 @@ def field_segmentation(frame, segmented_people, fixed_regions, gpu_devices, cfg)
     num_pixels = pixels.shape[0]
     sampled_indices = np.linspace(0, num_pixels - 1, num=num_pixels // 2).astype(int)
 
-    kmeans = FaissKMeans(cfg.clustering.num_clusters, cfg.clustering.max_iter, gpu_devices)
+    kmeans = FaissKMeans(
+        cfg.clustering.num_clusters, cfg.clustering.max_iter, gpu_devices
+    )
     kmeans.fit(pixels[sampled_indices, :])
     centers = kmeans.centroids
     labels = kmeans.predict(pixels)
 
     # Sorting clusters by number of pixels
-    sorted_indices = np.argsort(np.histogram(labels[sampled_indices], bins=np.arange(cfg.clustering.num_clusters + 1))[0])[::-1]
+    sorted_indices = np.argsort(
+        np.histogram(
+            labels[sampled_indices], bins=np.arange(cfg.clustering.num_clusters + 1)
+        )[0]
+    )[::-1]
     centers = np.uint8(centers[sorted_indices])
 
     # The largest cluster is assumed to be the field
@@ -210,14 +188,20 @@ def field_segmentation(frame, segmented_people, fixed_regions, gpu_devices, cfg)
     mask = mask.reshape(frame.shape[:2])
 
     # Removing small regions and connecting big ones
-    disk = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (cfg.opening_disk_radius, cfg.opening_disk_radius))
+    disk = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (cfg.opening_disk_radius, cfg.opening_disk_radius)
+    )
     opened_mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, disk)
 
     # Filtering regions by area
-    min_field_area = np.power(cfg.min_area_proportion * np.max(opened_mask.shape[:2]), 2)
+    min_field_area = np.power(
+        cfg.min_area_proportion * np.max(opened_mask.shape[:2]), 2
+    )
 
     filtered_mask = np.zeros(mask.shape, dtype=np.uint8)
-    contours = cv2.findContours(opened_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
+    contours = cv2.findContours(
+        opened_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )[0]
     for cnt in contours:
         if cv2.contourArea(cnt) < min_field_area:
             continue
@@ -228,12 +212,24 @@ def field_segmentation(frame, segmented_people, fixed_regions, gpu_devices, cfg)
     return mask
 
 
-def velocity_vectors_from_frame(rgb, flow, rgb_shape, flow_sizes, segmented_people, fixed_regions,
-                                gpu_devices, cfg):
+def velocity_vectors_from_frame(
+    rgb: np.ndarray,
+    flow: np.ndarray,
+    rgb_shape: Shape,
+    flow_sizes: Dict,
+    segmented_people: List[SegmentedPlayer],
+    fixed_regions: List[RegionProperties],
+    gpu_devices: List[int],
+    cfg: DictConfig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     components = caculate_inertia_matrix_components(flow)
-    field_mask = field_segmentation(rgb, segmented_people, fixed_regions, gpu_devices, cfg)
+    field_mask = field_segmentation(
+        rgb, segmented_people, fixed_regions, gpu_devices, cfg
+    )
     field_cnt = to_polygons(field_mask)
-    field_mask = img_as_bool(resize_to_flow_shape_and_remove_borders(field_mask, flow_sizes))
+    field_mask = img_as_bool(
+        resize_to_flow_shape_and_remove_borders(field_mask, flow_sizes)
+    )
     flow_vectors = flow[field_mask, :]
 
     if len(flow_vectors) > 0:
@@ -249,7 +245,9 @@ def velocity_vectors_from_frame(rgb, flow, rgb_shape, flow_sizes, segmented_peop
         flow_patch = get_patch(flow, scaled_bb, copy=False)
 
         if len(scaled_mask_cnts) == 0:
-            warnings.warn(f'Segmented person with bbox [{person.bb[0]}, {person.bb[1]}, {person.bb[2]}, {person.bb[3]}] has no contour')
+            warnings.warn(
+                f"Segmented person with bbox [{person.bb[0]}, {person.bb[1]}, {person.bb[2]}, {person.bb[3]}] has no contour"
+            )
             rr, cc = np.indices(flow_patch.shape[0:2])
             rr = rr.flatten()
             cc = cc.flatten()
@@ -258,7 +256,7 @@ def velocity_vectors_from_frame(rgb, flow, rgb_shape, flow_sizes, segmented_peop
             # FIXME: Polygon function sometimes exceeds the patch shape
             indices = (rr < flow_patch.shape[0]) & (cc < flow_patch.shape[1])
             if len(indices) < len(rr):
-                warnings.warn(f'Generated polygon exceeds patch shape')
+                warnings.warn(f"Generated polygon exceeds patch shape")
 
             rr, cc = rr[indices], cc[indices]
 
@@ -273,44 +271,71 @@ def velocity_vectors_from_frame(rgb, flow, rgb_shape, flow_sizes, segmented_peop
     return field_cnt, field_vector, np.asarray(velocity_vectors)
 
 
-def velocity_vectors_from_half_match(match: Match, half: int, cfg):
-    
+def velocity_vectors_from_half_match(match: Match, half: int, cfg: DictConfig) -> Dict[int, Dict[str, np.ndarray]]:
+
     # Matching corresponding RGB frames to optical flow frames.
     if match.paths.fixed_indices_results[half].exists():
-        match_indices = np.load(match.paths.fixed_indices_results[half])['match_indices']
-        num_all_frames = len(np.load(match.paths.all_segmentations[half], allow_pickle=True))
-        optical_flow_indices = [int(i * (match.num_optical_flow_frames[half] - 1) / (num_all_frames - 1)) for i in match_indices]
+        match_indices = np.load(match.paths.fixed_indices_results[half])[
+            "match_indices"
+        ]
+        num_all_frames = len(
+            np.load(match.paths.all_segmentations[half], allow_pickle=True)
+        )
+        optical_flow_indices = [
+            int(i * (match.num_optical_flow_frames[half] - 1) / (num_all_frames - 1))
+            for i in match_indices
+        ]
     else:
-        optical_flow_indices = np.ceil(np.linspace(match.num_optical_flow_frames[half] / match.num_rgb_frames[half],
-                                                   match.num_optical_flow_frames[half],
-                                                   num=match.num_rgb_frames[half])).astype(int) - 1
+        optical_flow_indices = (
+            np.ceil(
+                np.linspace(
+                    match.num_optical_flow_frames[half] / match.num_rgb_frames[half],
+                    match.num_optical_flow_frames[half],
+                    num=match.num_rgb_frames[half],
+                )
+            ).astype(int)
+            - 1
+        )
 
     rgb_shape = images_size(match.paths.frames[half, 0])
     flow_sizes = flow_sizes_constants(rgb_shape)
 
-    fixed_regions = segment_fixed_regions(match, half, optical_flow_indices, flow_sizes, cfg)
+    fixed_regions = segment_fixed_regions(
+        match, half, optical_flow_indices, flow_sizes, cfg
+    )
 
     results = {}
-    segmented_people = SegmentedPlayer.load(match.paths.segmentations[half], class_id_filters=POINTREND_PERSON_ID)
-    for idx in tqdm(range(match.num_rgb_frames[half]), desc=f'Half-match {half + 1} progress', leave=True, position=0):
-    
+    segmented_people = SegmentedPlayer.load(
+        match.paths.segmentations[half], class_id_filters=POINTREND_PERSON_ID
+    )
+    for idx in tqdm(
+        range(match.num_rgb_frames[half]),
+        desc=f"Half-match {half + 1} progress",
+        leave=True,
+        position=0,
+    ):
+
         if len(segmented_people[idx]) == 0:
             continue
 
         rgb = io.imread(match.paths.frames[half, idx])
         flow = match.load_optical_flow(half, optical_flow_indices[idx])
         flow = add_missing_borders(flow, flow_sizes)
-        field_mask, field_vector, velocity = velocity_vectors_from_frame(rgb,
-                                                                         flow,
-                                                                         rgb_shape,
-                                                                         flow_sizes,
-                                                                         segmented_people[idx],
-                                                                         fixed_regions,
-                                                                         cfg.gpu_devices,
-                                                                         cfg.velocity.field_segmentation)
-        results[idx] = {'field_mask': field_mask,
-                        'field_vector': field_vector,
-                        'velocity': velocity}
+        field_mask, field_vector, velocity = velocity_vectors_from_frame(
+            rgb,
+            flow,
+            rgb_shape,
+            flow_sizes,
+            segmented_people[idx],
+            fixed_regions,
+            cfg.gpu_devices,
+            cfg.velocity.field_segmentation,
+        )
+        results[idx] = {
+            "field_mask": field_mask,
+            "field_vector": field_vector,
+            "velocity": velocity,
+        }
     return results
 
 
@@ -318,10 +343,12 @@ def velocity_vectors_from_half_match(match: Match, half: int, cfg):
 def main(cfg: DictConfig):
     # Validation for the mutually exclusive group
     if (cfg.single_match is None) == (cfg.matches is None):
-        raise ValueError("You must provide either 'single_match' OR 'matches', but not both/neither.")
-    
+        raise ValueError(
+            "You must provide either 'single_match' OR 'matches', but not both/neither."
+        )
+
     load_log_configuration(cfg.logs.config, cfg.logs.dir)
-    
+
     if cfg.matches:
         with cfg.matches.open() as f:
             match_paths = [Path(line) for line in f.read().splitlines()]
@@ -330,22 +357,24 @@ def main(cfg: DictConfig):
 
     num_optical_flow_frames = load_num_optical_flow_frames(cfg.dataset_path)
 
-    for match_path in tqdm(match_paths, desc='Overall Progress', leave=True, position=0):
+    for match_path in tqdm(
+        match_paths, desc="Overall Progress", leave=True, position=0
+    ):
         match = Match(match_path)
         if match.paths.velocity_results.exists():
             continue
         start = time.time()
 
         match.num_optical_flow_frames = num_optical_flow_frames[match_path]
-        match.num_rgb_frames = [len(load_groundtruth_bboxes(match.paths.maskrcnn_bboxes[half])) for half in range(2)]
+        match.load_metadata()
 
-        logging.info(f'Processing match {match_paths.match}')
+        logging.info(f"Processing match {match_paths.match}")
         velocity = {}
         for half in range(2):
             velocity[half] = velocity_vectors_from_half_match(match, half, cfg)
 
         np.save(match.paths.velocity_results, velocity)
-        logging.info(f'Match processing time is {time.time() - start} seconds')
+        logging.info(f"Match processing time is {time.time() - start} seconds")
 
 
 if __name__ == "__main__":

@@ -4,9 +4,13 @@ from imantics import Polygons
 from util import images_size
 from tqdm import tqdm
 from skimage.io import imread
+from pixellib.torchbackend.instance import instanceSegmentation as PointRend
+from kitman.data import HierarchicalFilenameBuilder
 
 
-def preprocess_batch(point_rend, frames, height, width):
+def preprocess_batch(
+    point_rend: PointRend, frames: list[np.ndarray], height: int, width: int
+) -> list[dict]:
     inputs = []
     for i in range(len(frames)):
         image = point_rend.predictor.aug.get_transform(frames[i]).apply_image(frames[i])
@@ -15,7 +19,9 @@ def preprocess_batch(point_rend, frames, height, width):
     return inputs
 
 
-def cut_masks(bboxes, masks, copy=False):
+def cut_masks(
+    bboxes: list[tuple[int, int, int, int]], masks: list[np.ndarray], copy: bool = False
+) -> list[np.ndarray]:
     masks_ = []
     for i in range(len(bboxes)):
         x1, y1, x2, y2 = bboxes[i]
@@ -26,13 +32,13 @@ def cut_masks(bboxes, masks, copy=False):
     return masks_
 
 
-def to_polygons(masks):
+def to_polygons(masks: list[np.ndarray] | np.ndarray) -> list[np.ndarray] | Polygons:
     if isinstance(masks, list):
         return [Polygons.from_mask(m).points for m in masks]
     return Polygons.from_mask(masks).points
 
 
-def segment(point_rend, inputs, polygonal_masks=True):
+def segment(point_rend: PointRend, inputs: list[dict], polygonal_masks: bool = True):
     predictions = point_rend.predictor.model(inputs)
 
     outputs = []
@@ -59,23 +65,29 @@ def segment(point_rend, inputs, polygonal_masks=True):
         else:
             masks = cut_masks(boxes, masks, True)
 
-        outputs.append({"boxes": boxes,
-                        "class_ids": class_ids,
-                        "scores": scores,
-                        "masks": masks})
+        outputs.append(
+            {"boxes": boxes, "class_ids": class_ids, "scores": scores, "masks": masks}
+        )
     return outputs
 
 
-def segment_directory(point_rend, frame_paths, batch_size, num_frames=None):
+def segment_directory(
+    point_rend: PointRend,
+    frame_paths: HierarchicalFilenameBuilder,
+    batch_size: int,
+    num_frames: int = None,
+):
     if num_frames is None:
         frames_dir = frame_paths.path
-        num_frames = len(list(frames_dir.glob('*'+ frame_paths.suffix)))
+        num_frames = len(list(frames_dir.glob("*" + frame_paths.suffix)))
 
     height, width = images_size(frame_paths[0])
 
     results = []
     for i in tqdm(range(0, num_frames, batch_size)):
-        frames = [imread(frame_paths[j]) for j in range(i, min(i + batch_size, num_frames))]
+        frames = [
+            imread(frame_paths[j]) for j in range(i, min(i + batch_size, num_frames))
+        ]
         with torch.no_grad():
             inputs = preprocess_batch(point_rend, frames, height, width)
             predictions = segment(point_rend, inputs)

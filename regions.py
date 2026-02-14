@@ -1,4 +1,3 @@
-import warnings
 from functools import partial
 
 import cv2
@@ -103,7 +102,7 @@ def calculate_patch_hist(patch, mask=None, hist_type='rgb'):
     return calculate_hist(patch, mask, hist_type)
 
 
-def scale_mask(bb, cnts, scale):
+def scale_mask(bb, cnts, scale: np.ndarray):
     scaled_mask_bb = (np.tile(scale, 2) * bb).astype(np.int32)
     scaled_mask_shape = scaled_mask_bb[2:] - scaled_mask_bb[:2]
 

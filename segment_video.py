@@ -1,7 +1,6 @@
 import logging
 import subprocess
 import time
-from kitman.snv2 import MatchPaths
 from pathlib import Path
 
 import numpy as np
@@ -13,7 +12,7 @@ from segmentation import segment_directory
 from util import load_log_configuration
 
 import hydra
-
+from IO import Match
 
 @hydra.main(version_base=None, config_path="conf", config_name="segment_")
 def main(cfg: DictConfig):
@@ -38,12 +37,13 @@ def main(cfg: DictConfig):
 
         half = int(video.stem[0]) - 1
 
-        match_paths = MatchPaths(video.parent)
-        if match_paths.segmentations[half].exists:
+        match = Match(video.parent)
+
+        if match.paths.segmentations[half].exists:
             print(video)
             continue
 
-        frames_dir = match_paths.frames[half].path
+        frames_dir = match.paths.frames[half].path
         if not frames_dir.exists():
             frames_dir.mkdir(parents=True, exist_ok=True)
 
@@ -61,8 +61,8 @@ def main(cfg: DictConfig):
                 )
 
         start = time.time()
-        semantic_seg = segment_directory(point_rend, match_paths.frames[half], args.batch_size)
-        np.save(match_paths.segmentations[half], semantic_seg)
+        semantic_seg = segment_directory(point_rend, match.paths.frames[half], cfg.segmentation.batch_size)
+        np.save(match.paths.segmentations[half], semantic_seg)
         logging.info(f"Video processing time is {time.time() - start} seconds")
     
 if __name__ == "__main__":

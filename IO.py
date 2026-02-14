@@ -7,11 +7,70 @@ from typing import Dict, List, Union
 from functools import reduce
 from operator import truediv
 
+from kitman.data import DirPathsBuilder, NonZeroBasedIndex
+from kitman.snv2 import load_groundtruth_bboxes
 
 import numpy as np
 from skimage import io
 
 from kitman.regions import get_patch
+
+
+class MatchPaths(DirPathsBuilder):
+    def __init__(self, match_path):
+        match_path = Path(match_path)
+        super().__init__(
+            match_path,
+            {
+                "calibrations": "{}_field_calib_ccbv.json",
+                "clustered_segmentations": "clustering_{}_{}.npy",
+                "clustered_means": "cluster_means_{}.npy",
+                "clustered_segmentations_bkg": "clustering_bkg_{}_{}.npy",
+                "clustered_bkg_means": "cluster_bkg_means_{}.npy",
+                "frames": [["{}_HQ", "frames"], "{:05d}.jpg"],
+                "groundtruth": "groundtruth.npy",  # NEEDED, seems it was created somehow
+                "sampling_aspect_ratio": "sampling_aspect_ratio.txt",  # NEEDED, seems it was created somehow
+                ################
+                "all_segmentations": "all_segmentation_results_{}_HQ.npy",  # PointRend segmentation results for all frames
+                "fixed_indices_results": "fixed_indices_results_{}.npz",  # Created for Matches to correspond RGB frames to optical flow frames
+                "maskrcnn_bboxes": "{}_player_boundingbox_maskrcnn.json",  # Original Mask R-CNN bounding boxes
+                "segmentations": "segmentation_results_{}_HQ.npy",  # PointRend segmentation results
+                "velocity_results": "velocity_results.npy",
+                "u": [["{}_HQ", "u"], "{:06d}.jpg"],  # Optical flow U component frames
+                "v": [["{}_HQ", "v"], "{:06d}.jpg"],  # Optical flow V component frames
+            },
+            NonZeroBasedIndex(),
+        )
+        self.match = match_path
+        self.frames_extension = "jpg"
+
+
+class Match:
+    def __init__(self, match_path):
+        self.paths = MatchPaths(match_path)
+        self.num_rgb_frames = [None, None]
+        self.num_optical_flow_frames = [None, None]
+        self.groundtruth_bboxes = [None, None]
+
+    def optical_flow(self, half: int, idx: int):
+        u = io.imread(self.paths.u[half, idx]).astype(np.float32)
+        v = io.imread(self.paths.v[half, idx]).astype(np.float32)
+        return (np.stack((u, v), axis=2) - 128) / 127.999
+
+    def bboxes(self, half: int, idx: int):
+        if self.groundtruth_bboxes[half] is None:
+            self.load_groundtruth_bboxes(half)
+        return self.groundtruth_bboxes[half][idx]
+
+    def load_groundtruth_bboxes(self, half: int):
+        bboxes_path = self.paths.maskrcnn_bboxes[half]
+        self.groundtruth_bboxes[half] = load_groundtruth_bboxes(bboxes_path)
+
+    def load_metadata(self):
+        for half in range(2):
+            if self.groundtruth_bboxes[half] is None:
+                self.load_groundtruth_bboxes(half)
+            self.num_rgb_frames[half] = len(self.groundtruth_bboxes[half])
 
 
 @unique
